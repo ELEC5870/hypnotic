@@ -7,10 +7,11 @@ This project is licensed under the terms of the MIT license. For details, see LI
 """
 
 desc = """
-This is a utility for converting raw rate-distortion data from VTM into a variety of formats for easier handling. At the moment, the tool supports (de)serialising:
-* Raw data (`.rd`)
-* Pickle (`.pickle`)
-* Petastorm (`.petastorm`)
+This is a utility for converting raw rate-distortion data from VTM into a variety of formats
+for easier handling. At the moment, the tool supports (de)serialising:
+* Raw data (.rd)
+* Pickle (.pickle)
+* Petastorm (.petastorm)
 """
 
 from contextlib import nullcontext
@@ -55,7 +56,7 @@ def deserialise_rd_line(line):
         )
 
 
-def deserialise_rd(path, quiet=False):
+def deserialise_rd(path, quiet=True):
     data = []
     file_size = os.path.getsize(path)
 
@@ -87,7 +88,7 @@ def deserialise_petastorm(path):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FutureWarning)
 
-        with make_reader(url, reader_pool_type="process") as reader:
+        with make_reader(url) as reader:
             return [
                 Entry(
                     Area(
@@ -103,18 +104,18 @@ def deserialise_petastorm(path):
                     row.mip_flag,
                     row.lfnst_idx,
                     row.mts_flag,
-                    tuple(row.mpm),
+                    (row.mpm0, row.mpm1, row.mpm2, row.mpm3, row.mpm4, row.mpm5),
                 )
                 for row in reader
             ]
 
 
-def deserialise(path, format=None):
+def deserialise(path, format=None, quiet=True):
     if format is None:
-        format = os.path.splitext(path)[1][1:].rstrip("/")
+        format = os.path.splitext(path.rstrip("/"))[1][1:]
 
     if format == "rd":
-        data = deserialise_rd(path)
+        data = deserialise_rd(path, quiet)
     elif format == "pickle":
         data = deserialise_pickle(path)
     elif format == "petastorm":
@@ -140,9 +141,9 @@ def serialise_pickle(data, path):
         pickle.dump(data, f)
 
 
-def serialise_petastorm(data, path, num_parquet_files=10, cores=2, quiet=False):
+def serialise_petastorm(data, path, partitions=1, cores=2, quiet=True):
     import numpy as np
-    from petastorm.codecs import ScalarCodec, CompressedImageCodec, NdarrayCodec
+    from petastorm.codecs import ScalarCodec, NdarrayCodec
     from petastorm.etl.dataset_metadata import materialize_dataset
     from petastorm.unischema import dict_to_spark_row, Unischema, UnischemaField
     from pyspark.sql import SparkSession
@@ -151,7 +152,7 @@ def serialise_petastorm(data, path, num_parquet_files=10, cores=2, quiet=False):
     output_url = f"file://{os.path.abspath(path)}"
 
     # fmt: off
-    RDSchema = Unischema(
+    schema = Unischema(
         "RDSchema",
         [
             UnischemaField("x",             np.uint16,  (),   ScalarCodec(IntegerType()), False),
@@ -165,25 +166,35 @@ def serialise_petastorm(data, path, num_parquet_files=10, cores=2, quiet=False):
             UnischemaField("mip_flag",      np.bool_,   (),   ScalarCodec(IntegerType()), False),
             UnischemaField("lfnst_idx",     np.uint8,   (),   ScalarCodec(IntegerType()), False),
             UnischemaField("mts_flag",      np.uint8,   (),   ScalarCodec(IntegerType()), False),
-            UnischemaField("mpm",           np.uint8,   (6,), NdarrayCodec(),             False),
+            UnischemaField("mpm0",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
+            UnischemaField("mpm1",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
+            UnischemaField("mpm2",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
+            UnischemaField("mpm3",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
+            UnischemaField("mpm4",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
+            UnischemaField("mpm5",          np.uint8,   (),   ScalarCodec(IntegerType()), False),
         ],
     )
     # fmt: on
 
     def row_generator(entry):
         return {
-            RDSchema.x.name: np.uint16(entry.area.x),
-            RDSchema.y.name: np.uint16(entry.area.y),
-            RDSchema.w.name: np.uint16(entry.area.w),
-            RDSchema.h.name: np.uint16(entry.area.h),
-            RDSchema.cost.name: np.float32(entry.cost),
-            RDSchema.intra_mode.name: np.uint8(entry.intra_mode),
-            RDSchema.isp_mode.name: np.int8(entry.isp_mode),
-            RDSchema.multi_ref_idx.name: np.uint8(entry.multi_ref_idx),
-            RDSchema.mip_flag.name: np.bool_(entry.mip_flag),
-            RDSchema.lfnst_idx.name: np.uint8(entry.lfnst_idx),
-            RDSchema.mts_flag.name: np.uint8(entry.mts_flag),
-            RDSchema.mpm.name: np.asarray(entry.mpm, dtype=np.uint8),
+            schema.x.name: np.uint16(entry.area.x),
+            schema.y.name: np.uint16(entry.area.y),
+            schema.w.name: np.uint16(entry.area.w),
+            schema.h.name: np.uint16(entry.area.h),
+            schema.cost.name: np.float32(entry.cost),
+            schema.intra_mode.name: np.uint8(entry.intra_mode),
+            schema.isp_mode.name: np.int8(entry.isp_mode),
+            schema.multi_ref_idx.name: np.uint8(entry.multi_ref_idx),
+            schema.mip_flag.name: np.bool_(entry.mip_flag),
+            schema.lfnst_idx.name: np.uint8(entry.lfnst_idx),
+            schema.mts_flag.name: np.uint8(entry.mts_flag),
+            schema.mpm0.name: np.uint8(entry.mpm[0]),
+            schema.mpm1.name: np.uint8(entry.mpm[1]),
+            schema.mpm2.name: np.uint8(entry.mpm[2]),
+            schema.mpm3.name: np.uint8(entry.mpm[3]),
+            schema.mpm4.name: np.uint8(entry.mpm[4]),
+            schema.mpm5.name: np.uint8(entry.mpm[5]),
         }
 
     spark = (
@@ -201,19 +212,19 @@ def serialise_petastorm(data, path, num_parquet_files=10, cores=2, quiet=False):
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=FutureWarning)
 
-        with materialize_dataset(spark, output_url, RDSchema, row_group_size_mb=128):
+        with materialize_dataset(spark, output_url, schema, row_group_size_mb=128):
             rows_rdd = (
                 sc.parallelize(data, cores)
                 .map(row_generator)
-                .map(lambda x: dict_to_spark_row(RDSchema, x))
+                .map(lambda x: dict_to_spark_row(schema, x))
             )
 
-            spark.createDataFrame(rows_rdd, RDSchema.as_spark_schema()).coalesce(
-                num_parquet_files
+            spark.createDataFrame(rows_rdd, schema.as_spark_schema()).coalesce(
+                partitions
             ).write.mode("overwrite").parquet(output_url)
 
 
-def serialise(data, path, format=None):
+def serialise(data, path, format=None, quiet=True):
     if format is None:
         format = os.path.splitext(path)[1][1:]
 
@@ -222,7 +233,7 @@ def serialise(data, path, format=None):
     elif format == "pickle":
         serialise_pickle(data, path)
     elif format == "petastorm":
-        serialise_petastorm(data, path)
+        serialise_petastorm(data, path, quiet=quiet)
     else:
         raise Exception("Unknown format")
 
@@ -285,11 +296,16 @@ class Tests(unittest.TestCase):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description=desc, epilog=disclaimer)
-    parser.add_argument("input", help="Input file")
-    parser.add_argument("output", help="Output file")
-    parser.add_argument("--format", "-f", help="Output file format")
+    parser = argparse.ArgumentParser(
+        description=desc,
+        epilog=disclaimer,
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument("input", help="Input path")
+    parser.add_argument("output", help="Output path")
+    parser.add_argument("--format", "-f", help="Output format")
     parser.add_argument("--time", "-t", action="store_true")
+    parser.add_argument("--quiet", "-q", action="store_true")
     args = parser.parse_args()
 
     if args.time:
@@ -301,7 +317,7 @@ if __name__ == "__main__":
     # parse input
     if args.time:
         start = time.time()
-    data = deserialise(args.input)
+    data = deserialise(args.input, quiet=args.quiet)
     if args.time:
         end = time.time()
         print(f"Deserialised in {end - start:.2f}s")
@@ -311,7 +327,7 @@ if __name__ == "__main__":
     # write output
     if args.time:
         start = time.time()
-    serialise(data, args.output, format=args.format)
+    serialise(data, args.output, format=args.format, quiet=args.quiet)
     if args.time:
         end = time.time()
         print(f"Serialised in {end - start:.2f}s")
