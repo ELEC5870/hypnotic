@@ -12,6 +12,7 @@ for easier handling. At the moment, the tool supports (de)serialising:
 * Raw data (.rd)
 * Pickle (.pickle)
 * Petastorm (.petastorm)
+* Parquet (.parquet)
 """
 
 from contextlib import nullcontext
@@ -110,6 +111,57 @@ def deserialise_petastorm(path):
             ]
 
 
+def deserialise_parquet(path, quiet=True):
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(path)
+    table = table.to_batches()
+    if not quiet:
+        table = tqdm(table, desc="Deserialising")
+
+    data = []
+    for batch in table:
+        data += [
+            Entry(
+                Area(
+                    row["x"],
+                    row["y"],
+                    row["w"],
+                    row["h"],
+                ),
+                row["cost"],
+                row["intra_mode"],
+                row["isp_mode"],
+                row["multi_ref_idx"],
+                row["mip_flag"],
+                row["lfnst_idx"],
+                row["mts_flag"],
+                (
+                    row["mpm0"],
+                    row["mpm1"],
+                    row["mpm2"],
+                    row["mpm3"],
+                    row["mpm4"],
+                    row["mpm5"],
+                ),
+            )
+            for row in batch.to_pylist()
+        ]
+
+        # data += [
+        #     for row in batch]
+
+    # pbar = tqdm(desc="Deserialising")
+    # with pbar if not quiet else nullcontext():
+
+    # if not quiet:
+    #     pbar = tqdm(table, desc="Deserialising")
+    # else:
+    #     pbar = table.to_pylist()
+
+    return data
+
+
 def deserialise(path, format=None, quiet=True):
     if format is None:
         format = os.path.splitext(path.rstrip("/"))[1][1:]
@@ -120,6 +172,8 @@ def deserialise(path, format=None, quiet=True):
         data = deserialise_pickle(path)
     elif format == "petastorm":
         data = deserialise_petastorm(path)
+    elif format == "parquet":
+        data = deserialise_parquet(path, quiet)
     else:
         raise Exception("Unknown format")
 
@@ -224,6 +278,55 @@ def serialise_petastorm(data, path, partitions=1, cores=2, quiet=True):
             ).write.mode("overwrite").parquet(output_url)
 
 
+def serialise_parquet(data, path, quiet=True):
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import pyarrow.dataset as ds
+
+    fields = [
+        ("x", [entry.area.x for entry in data], pa.uint16()),
+        ("y", [entry.area.y for entry in data], pa.uint16()),
+        ("w", [entry.area.w for entry in data], pa.uint16()),
+        ("h", [entry.area.h for entry in data], pa.uint16()),
+        ("cost", [entry.cost for entry in data], pa.float32()),
+        ("intra_mode", [entry.intra_mode for entry in data], pa.uint8()),
+        ("isp_mode", [entry.isp_mode for entry in data], pa.int8()),
+        ("multi_ref_idx", [entry.multi_ref_idx for entry in data], pa.uint8()),
+        ("mip_flag", [entry.mip_flag for entry in data], pa.bool_()),
+        ("lfnst_idx", [entry.lfnst_idx for entry in data], pa.uint8()),
+        ("mts_flag", [entry.mts_flag for entry in data], pa.uint8()),
+        ("mpm0", [entry.mpm[0] for entry in data], pa.uint8()),
+        ("mpm1", [entry.mpm[1] for entry in data], pa.uint8()),
+        ("mpm2", [entry.mpm[2] for entry in data], pa.uint8()),
+        ("mpm3", [entry.mpm[3] for entry in data], pa.uint8()),
+        ("mpm4", [entry.mpm[4] for entry in data], pa.uint8()),
+        ("mpm5", [entry.mpm[5] for entry in data], pa.uint8()),
+    ]
+
+    pbar = tqdm(desc="Serialising", total=len(fields) + 2)
+    with pbar if not quiet else nullcontext():
+        columns = []
+        names = []
+        for name, val, type in fields:
+            columns.append(pa.array(val, type=type))
+            names.append(name)
+            if not quiet:
+                pbar.update()
+
+        table = pa.table(
+            columns,
+            names,
+        )
+        if not quiet:
+            pbar.update()
+
+        ds.write_dataset(
+            table, path, format="parquet", existing_data_behavior="overwrite_or_ignore"
+        )
+        if not quiet:
+            pbar.update()
+
+
 def serialise(data, path, format=None, quiet=True):
     if format is None:
         format = os.path.splitext(path)[1][1:]
@@ -234,6 +337,8 @@ def serialise(data, path, format=None, quiet=True):
         serialise_pickle(data, path)
     elif format == "petastorm":
         serialise_petastorm(data, path, quiet=quiet)
+    elif format == "parquet":
+        serialise_parquet(data, path, quiet=quiet)
     else:
         raise Exception("Unknown format")
 
