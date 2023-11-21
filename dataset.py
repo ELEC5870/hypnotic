@@ -12,7 +12,7 @@ NUM_INTRA_MODES = 67
 
 class ParquetRDDataset(torch.utils.data.Dataset):
     def __init__(self, image_path, parquet_path, filter=None, transform=None):
-        self.image = Image.open(image_path)
+        self.image = Image.open(os.path.expanduser(image_path))
         self.pq_file = pq.ParquetFile(parquet_path)
         self.filter = filter
         self.transform = transform
