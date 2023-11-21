@@ -29,7 +29,7 @@ RD_LINE_PATTERN = re.compile(
     r"\)"
 )
 
-rd_schema = pa.schema(
+RD_SCHEMA = pa.schema(
     [
         pa.field("x", pa.uint16()),
         pa.field("y", pa.uint16()),
@@ -160,7 +160,7 @@ class RowGroupReader:
 def rd_dump_to_parquet(
     input_path,
     output_path,
-    schema,
+    schema=RD_SCHEMA,
     partitions=None,
     row_group_size=33554432,
     quiet=True,
@@ -207,7 +207,7 @@ if __name__ == "__main__":
     rd_dump_to_parquet(
         args.input,
         args.output,
-        rd_schema,
+        RD_SCHEMA,
         partitions=args.num_parquet_files,
         row_group_size=args.row_group_size * 1024,
         quiet=args.quiet,
