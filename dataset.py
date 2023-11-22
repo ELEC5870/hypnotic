@@ -1,3 +1,4 @@
+import os
 import random
 import unittest
 
@@ -11,11 +12,21 @@ NUM_INTRA_MODES = 67
 
 
 class ParquetRDDataset(torch.utils.data.Dataset):
-    def __init__(self, image_path, parquet_path, filter=None, transform=None):
+    def __init__(
+        self,
+        image_path,
+        parquet_path,
+        filter=None,
+        transform=None,
+        target_transform=None,
+        deterministic=False,
+    ):
         self.image = Image.open(os.path.expanduser(image_path))
         self.pq_file = pq.ParquetFile(parquet_path)
         self.filter = filter
         self.transform = transform
+        self.target_transform = target_transform
+        self.deterministic = deterministic
 
     def __len__(self):
         return self.pq_file.num_row_groups
@@ -35,7 +46,8 @@ class ParquetRDDataset(torch.utils.data.Dataset):
                 "mip_flag",
                 "lfnst_idx",
                 "mts_flag",
-            ]
+            ],
+            use_threads=not self.deterministic,
         ).aggregate([("intra_mode", "list"), ("cost", "list")])
         # @TODO: This could be made less strict.
         #        Rows with more than 67 intra modes can likely be included. Duplicate
@@ -62,7 +74,11 @@ class ParquetRDDataset(torch.utils.data.Dataset):
             costs = [random.choice(cost) for cost in costs]
             targets.append(costs)
 
-        return torch.stack(inputs), torch.tensor(targets)
+        targets = torch.tensor(targets)
+        if self.target_transform:
+            targets = self.target_transform(targets)
+
+        return torch.stack(inputs), targets
 
 
 if __name__ == "__main__":
@@ -97,6 +113,7 @@ class Tests(unittest.TestCase):
 
         from serialise import rd_dump_to_parquet
 
+        # 4x4 black .bmp file
         IMAGE_TEST_DATA = bytes.fromhex(
             "424dba000000000000008a0000007c000000040000000400000001001800000000003000000"
             "0000000000000000000000000000000000000ff0000ff0000ff000000000000ff424752738f"
