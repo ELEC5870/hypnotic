@@ -6,12 +6,14 @@ import os
 import random
 
 import git
+import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow.compute as pc
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
+import torchvision
 from torchvision.transforms import v2 as transforms
 from torchvision.models import resnet50
 from tqdm import tqdm
@@ -111,13 +113,13 @@ if __name__ == "__main__":
     x, y = next(iter(training_dataloader))
     print(f"{x.shape=} {x.dtype=}")
     print(f"{y.shape=} {y.dtype=}")
-    # img_grid = torchvision.utils.make_grid(x)
-    # writer.add_image("input sample", img_grid)
-    # writer.flush()
+    img_grid = torchvision.utils.make_grid(x)
+    writer.add_image("input sample", img_grid)
+    writer.flush()
 
     # define model
     model = resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, 67)
+    model.fc = nn.Linear(model.fc.in_features, y.shape[1])
     model = model.to(device)
 
     # training hyperparameters
