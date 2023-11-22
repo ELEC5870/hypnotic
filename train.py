@@ -5,6 +5,7 @@ import itertools
 import os
 import random
 
+import git
 import numpy as np
 import pyarrow.compute as pc
 import torch
@@ -136,6 +137,13 @@ if __name__ == "__main__":
         run_name=".",  # Don't append an extra timestamp to the run name
     )
     writer.flush()
+
+    # log git revision
+    repo = git.Repo(search_parent_directories=True)
+    diff = repo.git.diff(repo.head.object.hexsha)
+    writer.add_text("git", f"`{repo.head.object.hexsha}`\n```\n{diff}\n```")
+    writer.flush()
+    del repo
 
     def train(dataloader, model, loss_fn, optimizer, epoch, profile=False):
         print()
