@@ -6,7 +6,6 @@ import os
 import random
 
 import git
-import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow.compute as pc
 import torch
@@ -69,21 +68,14 @@ if __name__ == "__main__":
             transforms.Grayscale(num_output_channels=3),
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
-            transforms.Normalize((0.5,), (0.5,)),
         ]
     )
     dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
         filter=(pc.field("w") == 16) & (pc.field("h") == 16),
-        transform=transforms.Compose(
-            [
-                transforms.Grayscale(num_output_channels=3),
-                transforms.ToImage(),
-                transforms.ToDtype(torch.float32, scale=True),
-            ]
-        ),
-        target_transform=torch.log,
+        transform=transform,
+        target_transform=lambda y: y.argmin(1),
         deterministic=not args.random_seed,
     )
     print(f"{len(dataset)=}")
@@ -96,7 +88,7 @@ if __name__ == "__main__":
         batch_size=None,
         batch_sampler=None,
         generator=generator,
-        # shuffle=True,
+        shuffle=True,
         # num_workers=args.data_loader_workers,
         # pin_memory=device != "cpu",
     )
@@ -105,7 +97,7 @@ if __name__ == "__main__":
         batch_size=None,
         batch_sampler=None,
         generator=generator,
-        # shuffle=True,
+        shuffle=True,
         # num_workers=args.data_loader_workers,
         # pin_memory=device != "cpu",
     )
@@ -119,11 +111,10 @@ if __name__ == "__main__":
 
     # define model
     model = resnet50(weights=None)
-    model.fc = nn.Linear(model.fc.in_features, y.shape[1])
     model = model.to(device)
 
     # training hyperparameters
-    loss_fn = nn.MSELoss()
+    loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     # log hyperparameters
@@ -191,9 +182,7 @@ if __name__ == "__main__":
                 x, y = x.to(device), y.to(device)
                 pred = model(x)
                 test_loss += loss_fn(pred, y).item()
-                correct += (
-                    (pred.argmin(1) == y.argmin(1)).type(torch.float).sum().item()
-                )
+                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
                 size += x.shape[0]
         test_loss /= num_batches
         correct /= size
