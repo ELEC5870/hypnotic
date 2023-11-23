@@ -46,6 +46,12 @@ class ParquetRDDataset(torch.utils.data.Dataset):
                 "mip_flag",
                 "lfnst_idx",
                 "mts_flag",
+                "mpm0",
+                "mpm1",
+                "mpm2",
+                "mpm3",
+                "mpm4",
+                "mpm5",
             ],
             use_threads=not self.deterministic,
         ).aggregate([("intra_mode", "list"), ("cost", "list")])
@@ -58,7 +64,8 @@ class ParquetRDDataset(torch.utils.data.Dataset):
         )
         row_group = row_group.to_pylist()
 
-        inputs = []
+        images = []
+        scalars = []
         targets = []
         for i, row in enumerate(row_group):
             pu = self.image.crop(
@@ -66,7 +73,25 @@ class ParquetRDDataset(torch.utils.data.Dataset):
             )
             if self.transform:
                 pu = self.transform(pu)
-            inputs.append(pu)
+            images.append(pu)
+
+            scalars.append(
+                torch.tensor(
+                    [
+                        row["isp_mode"],
+                        row["multi_ref_idx"],
+                        row["mip_flag"],
+                        row["lfnst_idx"],
+                        row["mts_flag"],
+                        row["mpm0"],
+                        row["mpm1"],
+                        row["mpm2"],
+                        row["mpm3"],
+                        row["mpm4"],
+                        row["mpm5"],
+                    ]
+                )
+            )
 
             costs = [[] for _ in range(NUM_INTRA_MODES)]
             for intra_mode, cost in zip(row["intra_mode_list"], row["cost_list"]):
@@ -78,7 +103,7 @@ class ParquetRDDataset(torch.utils.data.Dataset):
         if self.target_transform:
             targets = self.target_transform(targets)
 
-        return torch.stack(inputs), targets
+        return (torch.stack(images), torch.stack(scalars)), targets
 
 
 if __name__ == "__main__":

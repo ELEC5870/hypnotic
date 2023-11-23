@@ -14,10 +14,10 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 import torchvision
 from torchvision.transforms import v2 as transforms
-from torchvision.models import resnet50
 from tqdm import tqdm
 
 from dataset import ParquetRDDataset
+from model import Model
 
 
 if __name__ == "__main__":
@@ -102,16 +102,16 @@ if __name__ == "__main__":
         # pin_memory=device != "cpu",
     )
 
-    x, y = next(iter(training_dataloader))
-    print(f"{x.shape=} {x.dtype=}")
+    (x_image, x_scalars), y = next(iter(training_dataloader))
+    print(f"{x_image.shape=} {x_image.dtype=}")
+    print(f"{x_scalars.shape=} {x_scalars.dtype=}")
     print(f"{y.shape=} {y.dtype=}")
-    img_grid = torchvision.utils.make_grid(x)
+    img_grid = torchvision.utils.make_grid(x_image)
     writer.add_image("input sample", img_grid)
     writer.flush()
 
     # define model
-    model = resnet50(weights=None)
-    model = model.to(device)
+    model = Model().to(device)
 
     # training hyperparameters
     loss_fn = nn.CrossEntropyLoss()
@@ -151,12 +151,15 @@ if __name__ == "__main__":
             with_stack=True,
         )
         with profiler if profile else nullcontext() as profiler:
-            for i, (x, y) in enumerate(data):
-                x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+            for i, ((x_image, x_scalars), y) in enumerate(data):
+                x_image = x_image.to(device, non_blocking=True)
+                x_scalars = x_scalars.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True)
+
                 optimizer.zero_grad(set_to_none=True)
 
                 # compute loss
-                pred = model(x)
+                pred = model(x_image, x_scalars)
                 loss = loss_fn(pred, y)
 
                 # backpropagation
@@ -168,28 +171,34 @@ if __name__ == "__main__":
                 if profiler is not None:
                     profiler.step()
 
-                # ensure memory is freed
-                del pred, loss, x, y
-
     def test(dataloader, model, loss_fn, epoch):
         size = 0
         num_batches = len(dataloader)
         model.eval()
         data = tqdm(dataloader, desc=f"testing epoch {epoch}", disable=args.quiet)
-        test_loss, correct = 0, 0
+        test_losses, correct = [], 0
         with torch.no_grad():
-            for x, y in data:
-                x, y = x.to(device), y.to(device)
-                pred = model(x)
-                test_loss += loss_fn(pred, y).item()
+            for (x_image, x_scalars), y in data:
+                x_image = x_image.to(device, non_blocking=True)
+                x_scalars = x_scalars.to(device, non_blocking=True)
+                y = y.to(device, non_blocking=True)
+
+                pred = model(x_image, x_scalars)
+
+                test_losses.append(loss_fn(pred, y).item())
                 correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-                size += x.shape[0]
-        test_loss /= num_batches
+                size += x_image.shape[0]
         correct /= size
-        writer.add_scalar("testing_loss", test_loss, epoch)
+        mean_test_loss = sum(test_losses) / len(test_losses)
+        writer.add_scalar("testing_loss", mean_test_loss, epoch)
+        writer.add_histogram(
+            "testing_loss_distribution",
+            np.array(test_losses),
+            epoch,
+        )
         writer.add_scalar("accuracy", correct, epoch)
-        log(f"loss: {test_loss:.4f}, accuracy: {100 * correct:.2f}%")
-        return test_loss
+        log(f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%")
+        return mean_test_loss
 
     if args.epochs > 0:
         epochs = range(args.epochs)
