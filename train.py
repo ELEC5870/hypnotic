@@ -30,6 +30,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--data-loader-workers", type=int, default=2)
     parser.add_argument("--random-seed", action="store_true")
+    parser.add_argument("--resume", type=str)
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--profile", "-p", action="store_true")
     args = parser.parse_args()
@@ -116,6 +117,14 @@ if __name__ == "__main__":
     # training hyperparameters
     loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+
+    if args.resume:
+        checkpoint = torch.load(args.resume)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        start_epoch = checkpoint["epoch"]
+        testing_loss = checkpoint["testing_loss"]
+        log(f"resuming from epoch {start_epoch}, testing loss {testing_loss}")
 
     # log hyperparameters
     writer.add_hparams(
