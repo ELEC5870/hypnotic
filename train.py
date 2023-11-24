@@ -31,6 +31,9 @@ if __name__ == "__main__":
     parser.add_argument("--data-loader-workers", type=int, default=2)
     parser.add_argument("--random-seed", action="store_true")
     parser.add_argument("--resume", type=str)
+    parser.add_argument(
+        "--loss-function", default="mse", choices=["mse", "crossentropy"]
+    )
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--profile", "-p", action="store_true")
     args = parser.parse_args()
@@ -71,12 +74,24 @@ if __name__ == "__main__":
             transforms.ToDtype(torch.float32, scale=True),
         ]
     )
+
+    if args.loss_function == "mse":
+        target_transform = None
+        loss_fn = nn.MSELoss()
+        correct_fn = (
+            lambda pred, y: (pred.argmin(1) == y.argmin(1)).float().sum().item()
+        )
+    elif args.loss_function == "crossentropy":
+        target_transform = lambda y: y.argmin(1)
+        loss_fn = nn.CrossEntropyLoss()
+        correct_fn = lambda pred, y: (pred.argmax(1) == y).float().sum().item()
+
     dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
         filter=(pc.field("w") == 16) & (pc.field("h") == 16),
         transform=transform,
-        target_transform=lambda y: y.argmin(1),
+        target_transform=target_transform,
         deterministic=not args.random_seed,
     )
     print(f"{len(dataset)=}")
@@ -115,7 +130,6 @@ if __name__ == "__main__":
     model = Model().to(device)
 
     # training hyperparameters
-    loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
     if args.resume:
@@ -133,6 +147,7 @@ if __name__ == "__main__":
             "parquet_path": args.parquet_path,
             "dataset_size": len(dataset),
             "learning_rate": args.learning_rate,
+            "loss_fn": args.loss_function,
         },
         {},
         # @TODO: Fix this - at the moment it seems to break all other monitoring.
@@ -194,15 +209,15 @@ if __name__ == "__main__":
 
                 pred = model(x_image, x_scalars)
 
-                test_losses.append(loss_fn(pred, y).item())
-                correct += (pred.argmax(1) == y).type(torch.float).sum().item()
+                test_losses.append(loss_fn(pred, y).cpu().reshape(-1, 1))
+                correct += correct_fn(pred, y)
                 size += x_image.shape[0]
         correct /= size
-        mean_test_loss = sum(test_losses) / len(test_losses)
+        mean_test_loss = torch.cat(test_losses).mean().item()
         writer.add_scalar("testing_loss", mean_test_loss, epoch)
         writer.add_histogram(
             "testing_loss_distribution",
-            np.array(test_losses),
+            np.array(test_losses).flatten(),
             epoch,
         )
         writer.add_scalar("accuracy", correct, epoch)
