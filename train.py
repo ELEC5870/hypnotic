@@ -224,6 +224,6 @@ if __name__ == "__main__":
                 "optimizer_state_dict": optimizer.state_dict(),
                 "testing_loss": loss,
             },
-            os.path.join(run_dir, f"checkpoint_{t}.pt"),
+            os.path.join(run_dir, f"checkpoint.pt"),
         )
         writer.flush()
