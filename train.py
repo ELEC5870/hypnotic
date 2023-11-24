@@ -66,6 +66,20 @@ if __name__ == "__main__":
     run_dir = writer.log_dir
     log(f"writing logs to {run_dir}")
 
+    if args.loss_function == "mse":
+        target_transform = torch.log
+        training_loss_fn = nn.MSELoss()
+        sel_fn = lambda pred: pred.argmin(1)
+    elif args.loss_function == "crossentropy":
+        target_transform = lambda y: y.argmin(1)
+        training_loss_fn = nn.CrossEntropyLoss()
+        sel_fn = lambda pred: pred.argmax(1)
+
+    testing_loss_fn = (
+        lambda pred, y: y[torch.arange(len(y)), sel_fn(pred)] - y.min(1).values
+    )
+    correct_fn = lambda pred, y: (sel_fn(pred) == y.argmin(1)).float().sum().item()
+
     # load data
     transform = transforms.Compose(
         [
@@ -75,30 +89,25 @@ if __name__ == "__main__":
         ]
     )
 
-    if args.loss_function == "mse":
-        target_transform = None
-        loss_fn = nn.MSELoss()
-        correct_fn = (
-            lambda pred, y: (pred.argmin(1) == y.argmin(1)).float().sum().item()
-        )
-    elif args.loss_function == "crossentropy":
-        target_transform = lambda y: y.argmin(1)
-        loss_fn = nn.CrossEntropyLoss()
-        correct_fn = lambda pred, y: (pred.argmax(1) == y).float().sum().item()
-
+    filter = (pc.field("w") == 16) & (pc.field("h") == 16)
     dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
-        filter=(pc.field("w") == 16) & (pc.field("h") == 16),
+        filter=filter,
         transform=transform,
-        target_transform=target_transform,
         deterministic=not args.random_seed,
     )
     print(f"{len(dataset)=}")
-    training_dataset, testing_dataset = torch.utils.data.random_split(
-        dataset,
-        [0.75, 0.25],
-    )
+    if len(dataset) > 1:
+        testing_len = max(1, len(dataset) // 4)
+        [testing_dataset, training_dataset] = torch.utils.data.random_split(
+            dataset,
+            [testing_len, len(dataset) - testing_len],
+        )
+    else:
+        testing_dataset = dataset
+        training_dataset = dataset
+    training_dataset.target_transform = target_transform
     training_dataloader = DataLoader(
         training_dataset,
         batch_size=None,
@@ -145,7 +154,7 @@ if __name__ == "__main__":
         {
             "image_path": args.image_path,
             "parquet_path": args.parquet_path,
-            "dataset_size": len(dataset),
+            "dataset_size": len(training_dataset),
             "learning_rate": args.learning_rate,
             "loss_fn": args.loss_function,
         },
@@ -209,7 +218,8 @@ if __name__ == "__main__":
 
                 pred = model(x_image, x_scalars)
 
-                test_losses.append(loss_fn(pred, y).cpu().reshape(-1, 1))
+                loss = loss_fn(pred, y).cpu().reshape(-1, 1)
+                test_losses.append(loss)
                 correct += correct_fn(pred, y)
                 size += x_image.shape[0]
         correct /= size
@@ -217,7 +227,7 @@ if __name__ == "__main__":
         writer.add_scalar("testing_loss", mean_test_loss, epoch)
         writer.add_histogram(
             "testing_loss_distribution",
-            np.array(test_losses).flatten(),
+            torch.cat(test_losses).flatten(),
             epoch,
         )
         writer.add_scalar("accuracy", correct, epoch)
@@ -230,8 +240,8 @@ if __name__ == "__main__":
         epochs = itertools.count(1)
 
     for t in epochs:
-        train(training_dataloader, model, loss_fn, optimizer, t, args.profile)
-        loss = test(testing_dataloader, model, loss_fn, t)
+        train(training_dataloader, model, training_loss_fn, optimizer, t, args.profile)
+        loss = test(testing_dataloader, model, testing_loss_fn, t)
         torch.save(
             {
                 "epoch": t,
