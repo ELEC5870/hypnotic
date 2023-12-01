@@ -16,17 +16,26 @@ from tqdm import tqdm
 
 RD_LINE_PATTERN = re.compile(
     r"IntraCost T "
-    r"\[x=(\d+),y=(\d+),w=(\d+),h=(\d+)\] "  # [x,y,w,h]
-    r"([\d.]+) "  # cost
-    r"\("
-    r"(\d+),"  # intra_mode
-    r"([\d-]+),"  # isp_mode
-    r"(\d+),"  # multi_ref_idx
-    r"(\d+),"  # mip_flag
-    r"(\d+),"  # lfnst_idx
-    r"(\d+),"  # mts_flag
-    r"\[(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)\]"  # mpm
-    r"\)"
+    r"x=(\d+),"
+    r"y=(\d+),"
+    r"w=(\d+),"
+    r"h=(\d+),"
+    r"cost=([\d.e+-]+),"
+    r"dist=([\d.e+-]+),"
+    r"fracBits=([\d.e+-]+),"
+    r"lambda=([\d.e+-]+),"
+    r"modeId=(\d+),"
+    r"ispMod=([\d-]+),"
+    r"multiRefIdx=(\d+),"
+    r"mipFlag=(\d+),"
+    r"lfnstIdx=(\d+),"
+    r"mtsFlag=(\d+),"
+    r"mpm_pred0=(\d+),"
+    r"mpm_pred1=(\d+),"
+    r"mpm_pred2=(\d+),"
+    r"mpm_pred3=(\d+),"
+    r"mpm_pred4=(\d+),"
+    r"mpm_pred5=(\d+)"
 )
 
 RD_SCHEMA = pa.schema(
@@ -36,6 +45,9 @@ RD_SCHEMA = pa.schema(
         pa.field("w", pa.uint16()),
         pa.field("h", pa.uint16()),
         pa.field("cost", pa.float32()),
+        pa.field("dist", pa.float32()),
+        pa.field("fracBits", pa.float32()),
+        pa.field("lambda", pa.float32()),
         pa.field("intra_mode", pa.uint8()),
         pa.field("isp_mode", pa.int8()),
         pa.field("multi_ref_idx", pa.uint8()),
@@ -59,18 +71,21 @@ def _match_to_dict(match):
         "w": np.uint16(match.group(3)),
         "h": np.uint16(match.group(4)),
         "cost": np.float32(match.group(5)),
-        "intra_mode": np.uint8(match.group(6)),
-        "isp_mode": np.int8(match.group(7)),
-        "multi_ref_idx": np.uint8(match.group(8)),
-        "mip_flag": np.bool_(match.group(9) != "0"),
-        "lfnst_idx": np.uint8(match.group(10)),
-        "mts_flag": np.uint8(match.group(11)),
-        "mpm0": np.uint8(match.group(12)),
-        "mpm1": np.uint8(match.group(13)),
-        "mpm2": np.uint8(match.group(14)),
-        "mpm3": np.uint8(match.group(15)),
-        "mpm4": np.uint8(match.group(16)),
-        "mpm5": np.uint8(match.group(17)),
+        "dist": np.float32(match.group(6)),
+        "fracBits": np.float32(match.group(7)),
+        "lambda": np.float32(match.group(8)),
+        "intra_mode": np.uint8(match.group(9)),
+        "isp_mode": np.int8(match.group(10)),
+        "multi_ref_idx": np.uint8(match.group(11)),
+        "mip_flag": np.bool_(match.group(12) != "0"),
+        "lfnst_idx": np.uint8(match.group(13)),
+        "mts_flag": np.uint8(match.group(14)),
+        "mpm0": np.uint8(match.group(15)),
+        "mpm1": np.uint8(match.group(16)),
+        "mpm2": np.uint8(match.group(17)),
+        "mpm3": np.uint8(match.group(18)),
+        "mpm4": np.uint8(match.group(19)),
+        "mpm5": np.uint8(match.group(20)),
     }
 
 
@@ -95,10 +110,12 @@ class RowReader:
         return self
 
     def __next__(self):
-        if (line := self.file.readline()) == "":
+        line = self.file.readline()
+        if line == "":
             raise StopIteration
 
-        if not (match := re.match(RD_LINE_PATTERN, line)):
+        match = RD_LINE_PATTERN.match(line)
+        if not match:
             return self.__next__()
 
         return _match_to_dict(match)
