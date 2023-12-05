@@ -3,15 +3,16 @@ import random
 import unittest
 
 from PIL import Image
+import pyarrow as pa
+import pyarrow.dataset as ds
 import pyarrow.compute as pc
-import pyarrow.parquet as pq
 import torch
 from torchvision.transforms import v2 as transforms
 
 NUM_INTRA_MODES = 67
 
 
-class ParquetRDDataset(torch.utils.data.Dataset):
+class ParquetRDDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
         image_path,
@@ -22,46 +23,46 @@ class ParquetRDDataset(torch.utils.data.Dataset):
         deterministic=False,
     ):
         self.image = Image.open(os.path.expanduser(image_path))
-        self.pq_file = pq.ParquetFile(parquet_path)
+        self.dataset = ds.dataset(parquet_path, format="parquet")
         self.filter = filter
         self.transform = transform
         self.target_transform = target_transform
         self.deterministic = deterministic
-
-    def __len__(self):
-        return self.pq_file.num_row_groups
-
-    def __getitem__(self, idx):
-        row_group = self.pq_file.read_row_group(idx)
-
-        if self.filter is not None:
-            row_group = row_group.filter(self.filter)
-
-        predictors = row_group.column_names
+        self.predictors = self.dataset.schema.names
         for col in ["intra_mode", "cost", "dist", "fracBits"]:
             try:
-                predictors.remove(col)
+                self.predictors.remove(col)
             # Ignore if col is not present
             except ValueError:
                 pass
 
-        row_group = row_group.group_by(
-            predictors,
+        self.len = sum(1 for _ in self.dataset.to_batches(filter=self.filter))
+
+    def __iter__(self):
+        return map(self._modify_batch, self.dataset.to_batches(filter=self.filter))
+
+    def __len__(self):
+        return self.len
+
+    def _modify_batch(self, batch):
+        batch = pa.Table.from_batches([batch])
+        batch = batch.group_by(
+            self.predictors,
             use_threads=not self.deterministic,
         ).aggregate([("intra_mode", "list"), ("cost", "list")])
         # @TODO: This could be made less strict.
         #        Rows with more than 67 intra modes can likely be included. Duplicate
         #        costs for a given intra mode could be averaged or chosen from at
         #        random.
-        row_group = row_group.filter(
+        batch = batch.filter(
             pc.list_value_length(pc.field("intra_mode_list")) == NUM_INTRA_MODES
         )
-        row_group = row_group.to_pylist()
+        batch = batch.to_pylist()
 
         images = []
         scalars = []
         targets = []
-        for i, row in enumerate(row_group):
+        for i, row in enumerate(batch):
             pu = self.image.crop(
                 (row["x"], row["y"], row["x"] + row["w"], row["y"] + row["h"])
             )

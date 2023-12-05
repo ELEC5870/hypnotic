@@ -80,7 +80,7 @@ if __name__ == "__main__":
     testing_loss_fn = (
         lambda pred, y: y[torch.arange(len(y)), sel_fn(pred)] - y.min(1).values
     )
-    correct_fn = lambda pred, y: (sel_fn(pred) == y.argmin(1)).float().sum().item()
+    correct_fn = lambda pred, y: (sel_fn(pred) == sel_fn(y)).float().sum().item()
 
     # load data
     transform = transforms.Compose(
@@ -91,45 +91,29 @@ if __name__ == "__main__":
         ]
     )
 
+    # @TODO: Split into training and testing datasets
     filter = (pc.field("w") == 16) & (pc.field("h") == 16)
     dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
         filter=filter,
         transform=transform,
+        target_transform=target_transform,
         deterministic=not args.random_seed,
     )
-    print(f"{len(dataset)=}")
-    if len(dataset) > 1:
-        testing_len = max(1, len(dataset) // 4)
-        [testing_dataset, training_dataset] = torch.utils.data.random_split(
-            dataset,
-            [testing_len, len(dataset) - testing_len],
-        )
-    else:
-        testing_dataset = dataset
-        training_dataset = dataset
-    training_dataset.target_transform = target_transform
-    training_dataloader = DataLoader(
-        training_dataset,
+    # [testing_dataset, training_dataset] = torch.utils.data.random_split(
+    #     dataset,
+    #     [0.25, 0.75],
+    # )
+    dataloader = DataLoader(
+        dataset,
         batch_size=None,
         batch_sampler=None,
         generator=generator,
-        shuffle=True,
-        # num_workers=args.data_loader_workers,
-        # pin_memory=device != "cpu",
-    )
-    testing_dataloader = DataLoader(
-        testing_dataset,
-        batch_size=None,
-        batch_sampler=None,
-        generator=generator,
-        shuffle=True,
-        # num_workers=args.data_loader_workers,
-        # pin_memory=device != "cpu",
     )
 
-    (x_image, x_scalars), y = next(iter(training_dataloader))
+    (x_image, x_scalars), y = next(iter(dataloader))
+    print(f"{len(dataset)=}")
     print(f"{x_image.shape=} {x_image.dtype=}")
     print(f"{x_scalars.shape=} {x_scalars.dtype=}")
     print(f"{y.shape=} {y.dtype=}")
@@ -159,7 +143,7 @@ if __name__ == "__main__":
         {
             "image_path": args.image_path,
             "parquet_path": args.parquet_path,
-            "dataset_size": len(training_dataset),
+            "dataset_size": len(dataset),
             "learning_rate": args.learning_rate,
             "loss_fn": args.loss_function,
         },
@@ -259,8 +243,8 @@ if __name__ == "__main__":
         epochs = itertools.count(1)
 
     for t in epochs:
-        train(training_dataloader, model, training_loss_fn, optimizer, t, args.profile)
-        loss = test(testing_dataloader, model, testing_loss_fn, t)
+        train(dataloader, model, training_loss_fn, optimizer, t, args.profile)
+        loss = test(dataloader, model, testing_loss_fn, t)
         torch.save(
             {
                 "epoch": t,
