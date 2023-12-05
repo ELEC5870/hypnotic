@@ -17,7 +17,7 @@ from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
 
 from dataset import ParquetRDDataset
-from model import Model
+from model import LaudeAndOstermannPlusScalars
 
 
 if __name__ == "__main__":
@@ -83,7 +83,7 @@ if __name__ == "__main__":
     # load data
     transform = transforms.Compose(
         [
-            transforms.Grayscale(num_output_channels=3),
+            transforms.Grayscale(),
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
         ]
@@ -136,7 +136,10 @@ if __name__ == "__main__":
     writer.flush()
 
     # define model
-    model = Model().to(device)
+    model = LaudeAndOstermannPlusScalars(
+        pu_size=(x_image.shape[2], x_image.shape[3]), num_scalars=x_scalars.shape[1]
+    )
+    model = model.to(device)
 
     # training hyperparameters
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
