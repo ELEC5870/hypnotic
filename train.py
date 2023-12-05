@@ -6,9 +6,11 @@ import os
 import random
 
 import git
+import matplotlib.pyplot as plt
 import numpy as np
 import pyarrow.compute as pc
 import torch
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
@@ -213,6 +215,7 @@ if __name__ == "__main__":
         model.eval()
         data = tqdm(dataloader, desc=f"testing epoch {epoch}", disable=args.quiet)
         test_losses, correct = [], 0
+        cm = np.zeros((67, 67), dtype=np.int64)
         with torch.no_grad():
             for (x_image, x_scalars), y in data:
                 x_image = x_image.to(device, non_blocking=True)
@@ -225,6 +228,10 @@ if __name__ == "__main__":
                 test_losses.append(loss)
                 correct += correct_fn(pred, y)
                 size += x_image.shape[0]
+
+                cm += confusion_matrix(
+                    sel_fn(y).cpu(), sel_fn(pred).cpu(), labels=range(67)
+                )
         correct /= size
         mean_test_loss = torch.cat(test_losses).mean().item()
         writer.add_scalar("testing_loss", mean_test_loss, epoch)
@@ -235,6 +242,15 @@ if __name__ == "__main__":
         )
         writer.add_scalar("accuracy", correct, epoch)
         log(f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%")
+        disp = ConfusionMatrixDisplay(cm)
+        disp.plot(include_values=False)
+        labels = ["" for _ in range(67)]
+        labels[0] = "0"
+        labels[18] = "18"
+        labels[50] = "50"
+        plt.gca().set_xticklabels(labels)
+        plt.gca().set_yticklabels(labels)
+        writer.add_figure("confusion_matrix", plt.gcf(), epoch)
         return mean_test_loss
 
     if args.epochs > 0:
