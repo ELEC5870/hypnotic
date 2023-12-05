@@ -33,26 +33,20 @@ class ParquetRDDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         row_group = self.pq_file.read_row_group(idx)
+
         if self.filter is not None:
             row_group = row_group.filter(self.filter)
+
+        predictors = row_group.column_names
+        for col in ["intra_mode", "cost", "dist", "fracBits"]:
+            try:
+                predictors.remove(col)
+            # Ignore if col is not present
+            except ValueError:
+                pass
+
         row_group = row_group.group_by(
-            [
-                "x",
-                "y",
-                "w",
-                "h",
-                "isp_mode",
-                "multi_ref_idx",
-                "mip_flag",
-                "lfnst_idx",
-                "mts_flag",
-                "mpm0",
-                "mpm1",
-                "mpm2",
-                "mpm3",
-                "mpm4",
-                "mpm5",
-            ],
+            predictors,
             use_threads=not self.deterministic,
         ).aggregate([("intra_mode", "list"), ("cost", "list")])
         # @TODO: This could be made less strict.
