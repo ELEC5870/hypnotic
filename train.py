@@ -70,16 +70,17 @@ if __name__ == "__main__":
 
     if args.loss_function == "mse":
         target_transform = torch.log
-        training_loss_fn = nn.MSELoss()
+        loss_fn = nn.MSELoss()
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
         target_transform = lambda y: y.argmin(1)
-        training_loss_fn = nn.CrossEntropyLoss()
+        loss_fn = nn.CrossEntropyLoss()
         sel_fn = lambda pred: pred.argmax(1)
 
-    testing_loss_fn = (
-        lambda pred, y: y[torch.arange(len(y)), sel_fn(pred)] - y.min(1).values
-    )
+    # rd_cost_fn = (
+    #     lambda pred, y: y[torch.arange(len(y)), sel_fn(pred)]
+    #     - y[torch.arange(len(y)), sel_fn(y)]
+    # )
     correct_fn = lambda pred, y: (sel_fn(pred) == sel_fn(y)).float().sum().item()
 
     # load data
@@ -208,7 +209,7 @@ if __name__ == "__main__":
 
                 pred = model(x_image, x_scalars)
 
-                loss = loss_fn(pred, y).cpu().reshape(-1, 1)
+                loss = loss_fn(pred, y)
                 test_losses.append(loss)
                 correct += correct_fn(pred, y)
                 size += x_image.shape[0]
@@ -217,11 +218,11 @@ if __name__ == "__main__":
                     sel_fn(y).cpu(), sel_fn(pred).cpu(), labels=range(67)
                 )
         correct /= size
-        mean_test_loss = torch.cat(test_losses).mean().item()
+        mean_test_loss = sum(test_losses) / size
         writer.add_scalar("testing_loss", mean_test_loss, epoch)
         writer.add_histogram(
             "testing_loss_distribution",
-            torch.cat(test_losses).flatten(),
+            torch.stack(test_losses),
             epoch,
         )
         writer.add_scalar("accuracy", correct, epoch)
@@ -243,8 +244,8 @@ if __name__ == "__main__":
         epochs = itertools.count(1)
 
     for t in epochs:
-        train(dataloader, model, training_loss_fn, optimizer, t, args.profile)
-        loss = test(dataloader, model, testing_loss_fn, t)
+        train(dataloader, model, loss_fn, optimizer, t, args.profile)
+        loss = test(dataloader, model, loss_fn, t)
         torch.save(
             {
                 "epoch": t,
