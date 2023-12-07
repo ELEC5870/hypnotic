@@ -1,7 +1,9 @@
+from itertools import islice
 import os
 import random
 import unittest
 
+from more_itertools import consume
 from PIL import Image
 import pyarrow as pa
 import pyarrow.dataset as ds
@@ -17,6 +19,8 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         self,
         image_path,
         parquet_path,
+        limit=None,
+        offset=0,
         filter=None,
         transform=None,
         target_transform=None,
@@ -24,6 +28,8 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
     ):
         self.image = Image.open(os.path.expanduser(image_path))
         self.dataset = ds.dataset(parquet_path, format="parquet")
+        self.limit = limit
+        self.offset = offset
         self.filter = filter
         self.transform = transform
         self.target_transform = target_transform
@@ -39,10 +45,15 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         self.len = sum(1 for _ in self.dataset.to_batches(filter=self.filter))
 
     def __iter__(self):
-        return map(self._modify_batch, self.dataset.to_batches(filter=self.filter))
+        iter = self.dataset.to_batches(filter=self.filter)
+        consume(iter, self.offset)
+        if self.limit:
+            iter = islice(iter, self.limit)
+        return map(self._modify_batch, iter)
 
     def __len__(self):
-        return self.len
+        capacity = self.len - self.offset
+        return min(capacity, self.limit) if self.limit else capacity
 
     def _modify_batch(self, batch):
         batch = pa.Table.from_batches([batch])

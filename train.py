@@ -31,7 +31,7 @@ def seed_prngs(random_seed):
         np.random.seed(0)
 
 
-def dataloader():
+def dataloaders():
     transform = transforms.Compose(
         [
             transforms.Grayscale(),
@@ -42,7 +42,7 @@ def dataloader():
 
     # @TODO: Split into training and testing datasets
     filter = (pc.field("w") == args.width) & (pc.field("h") == args.height)
-    dataset = ParquetRDDataset(
+    training_dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
         filter=filter,
@@ -50,18 +50,33 @@ def dataloader():
         target_transform=target_transform,
         deterministic=not args.random_seed,
     )
-    # [testing_dataset, training_dataset] = torch.utils.data.random_split(
-    #     dataset,
-    #     [0.25, 0.75],
-    # )
-    dataloader = DataLoader(
-        dataset,
+    testing_size = len(training_dataset) // 4
+    training_dataset.limit = len(training_dataset) - testing_size
+    testing_dataset = ParquetRDDataset(
+        args.image_path,
+        args.parquet_path,
+        filter=filter,
+        transform=transform,
+        target_transform=target_transform,
+        offset=training_dataset.limit,
+        deterministic=not args.random_seed,
+    )
+
+    training_dataloader = DataLoader(
+        training_dataset,
         batch_size=None,
         batch_sampler=None,
         generator=generator,
     )
 
-    return dataloader
+    testing_dataloader = DataLoader(
+        testing_dataset,
+        batch_size=None,
+        batch_sampler=None,
+        generator=generator,
+    )
+
+    return (training_dataloader, testing_dataloader)
 
 
 def tb_write_meta():
@@ -70,7 +85,7 @@ def tb_write_meta():
         {
             "image_path": args.image_path,
             "parquet_path": args.parquet_path,
-            "dataset_size": len(dataloader),
+            "dataset_size": len(training_dataloader),
             "learning_rate": args.learning_rate,
             "loss_fn": args.loss_function,
         },
@@ -85,8 +100,8 @@ def tb_write_meta():
     writer.add_text("git", f"`{repo.head.object.hexsha}`\n```\n{diff}\n```")
 
     # dataset info
-    (x_image, x_scalars), y = next(iter(dataloader))
-    log(f"{len(dataloader)=}")
+    (x_image, x_scalars), y = next(iter(training_dataloader))
+    log(f"{len(training_dataloader)=}")
     log(f"{x_image.shape=} {x_image.dtype=}")
     log(f"{x_scalars.shape=} {x_scalars.dtype=}")
     log(f"{y.shape=} {y.dtype=}")
@@ -246,8 +261,8 @@ if __name__ == "__main__":
     correct_fn = lambda pred, y: (sel_fn(pred) == sel_fn(y)).float().sum().item()
 
     # load dataset
-    dataloader = dataloader()
-    (x_image_example, x_scalars_example), y_example = next(iter(dataloader))
+    training_dataloader, testing_dataloader = dataloaders()
+    (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
 
     # define model
     model = LaudeAndOstermannPlusScalars(
@@ -271,8 +286,8 @@ if __name__ == "__main__":
     # train and test loop
     epochs = range(args.epochs) if args.epochs > 0 else itertools.count(1)
     for t in epochs:
-        train(dataloader, model, loss_fn, optimizer, t, args.profile)
-        test(dataloader, model, loss_fn, t)
+        train(training_dataloader, model, loss_fn, optimizer, t, args.profile)
+        test(testing_dataloader, model, loss_fn, t)
 
         torch.save(
             {
