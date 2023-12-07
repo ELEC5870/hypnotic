@@ -57,7 +57,6 @@ def dataloaders():
         args.parquet_path,
         filter=filter,
         transform=transform,
-        target_transform=target_transform,
         offset=training_dataset.limit,
         deterministic=not args.random_seed,
     )
@@ -158,31 +157,35 @@ def plot_confusion_matrix(cm):
     return plt.gcf()
 
 
-def test(dataloader, model, loss_fn, epoch):
+def test(dataloader, target_transform, model, loss_fn, epoch):
     model.eval()
 
     num_samples = 0
     num_batches = len(dataloader)
     data = tqdm(dataloader, desc=f"testing epoch {epoch}", disable=args.quiet)
-    test_losses, correct = [], 0
+    test_losses, correct, rd_costs = [], 0, []
     cm = np.zeros((67, 67), dtype=np.int64)
 
     with torch.no_grad():
         for (x_image, x_scalars), y in data:
             x_image = x_image.to(device, non_blocking=True)
             x_scalars = x_scalars.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+            if target_transform is not None:
+                tx_y = target_transform(y).to(device, non_blocking=True)
+            else:
+                tx_y = y.to(device, non_blocking=True)
             num_samples += x_image.shape[0]
 
             pred = model(x_image, x_scalars)
 
             # update metrics
-            loss = loss_fn(pred, y)
+            loss = loss_fn(pred, tx_y)
             test_losses.append(loss)
-            correct += correct_fn(pred, y)
+            correct += correct_fn(pred, tx_y)
             cm += confusion_matrix(
-                sel_fn(y).cpu(), sel_fn(pred).cpu(), labels=range(67)
+                sel_fn(tx_y).cpu(), sel_fn(pred).cpu(), labels=range(67)
             )
+            rd_costs.append(rd_cost_fn(pred, y))
 
     # @NOTE: This is a mean of means, which is a bit wrong
     mean_test_loss = sum(test_losses) / num_batches
@@ -195,10 +198,16 @@ def test(dataloader, model, loss_fn, epoch):
 
     correct /= num_samples
     writer.add_scalar("accuracy", correct, epoch)
-    log(f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%")
 
     cm = plot_confusion_matrix(cm)
     writer.add_figure("confusion_matrix", cm, epoch)
+
+    mean_rd_cost = torch.cat(rd_costs).mean()
+    writer.add_scalar("rd_cost", mean_rd_cost, epoch)
+
+    log(
+        f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%, RD cost vs optimal: {100 * mean_rd_cost:.2f}%"
+    )
 
 
 if __name__ == "__main__":
@@ -254,10 +263,10 @@ if __name__ == "__main__":
         target_transform = lambda y: y.argmin(1)
         loss_fn = nn.CrossEntropyLoss()
         sel_fn = lambda pred: pred.argmax(1)
-    # rd_cost_fn = (
-    #     lambda pred, y: y[torch.arange(len(y)), sel_fn(pred)]
-    #     - y[torch.arange(len(y)), sel_fn(y)]
-    # )
+    rd_cost_fn = (
+        lambda pred, y: (y[torch.arange(len(y)), sel_fn(pred).cpu()] - y.min(1).values)
+        / y.min(1).values
+    )
     correct_fn = lambda pred, y: (sel_fn(pred) == sel_fn(y)).float().sum().item()
 
     # load dataset
@@ -287,7 +296,7 @@ if __name__ == "__main__":
     epochs = range(args.epochs) if args.epochs > 0 else itertools.count(1)
     for t in epochs:
         train(training_dataloader, model, loss_fn, optimizer, t, args.profile)
-        test(testing_dataloader, model, loss_fn, t)
+        test(testing_dataloader, target_transform, model, loss_fn, t)
 
         torch.save(
             {
