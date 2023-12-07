@@ -26,8 +26,26 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         target_transform=None,
         deterministic=False,
     ):
-        self.image = Image.open(os.path.expanduser(image_path))
-        self.dataset = ds.dataset(parquet_path, format="parquet")
+        if os.path.isdir(image_path):
+            self.image = {}
+            for path in os.listdir(image_path):
+                if path.endswith(".bmp"):
+                    sequence = (
+                        os.path.basename(path).replace(".bmp", "").replace("_", "-")
+                    )
+                    self.image[sequence] = Image.open(os.path.join(image_path, path))
+        else:
+            sequence = (
+                os.path.basename(image_path).replace(".bmp", "").replace("_", "-")
+            )
+            self.image = {sequence: Image.open(os.path.expanduser(image_path))}
+
+        partitioning = ds.partitioning(
+            flavor="filename", schema=pa.schema([("sequence", pa.string())])
+        )
+        self.dataset = ds.dataset(
+            parquet_path, format="parquet", partitioning=partitioning
+        )
         self.limit = limit
         self.offset = offset
         self.filter = filter
@@ -74,9 +92,13 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         scalars = []
         targets = []
         for i, row in enumerate(batch):
-            pu = self.image.crop(
-                (row["x"], row["y"], row["x"] + row["w"], row["y"] + row["h"])
-            )
+            try:
+                pu = self.image[row["sequence"]].crop(
+                    (row["x"], row["y"], row["x"] + row["w"], row["y"] + row["h"])
+                )
+            except KeyError:
+                print(self.image)
+                raise KeyError(row["sequence"])
             if self.transform:
                 pu = self.transform(pu)
             images.append(pu)
