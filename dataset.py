@@ -88,6 +88,9 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         )
         batch = batch.to_pylist()
 
+        if len(batch) == 0:
+            return (torch.empty(0), torch.empty(0, 0)), torch.empty(0, 0)
+
         images = []
         scalars = []
         targets = []

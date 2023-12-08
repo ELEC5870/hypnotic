@@ -125,6 +125,9 @@ def train(dataloader, model, loss_fn, optimizer, epoch, profile=False):
     )
     with profiler if profile else nullcontext() as profiler:
         for i, ((x_image, x_scalars), y) in enumerate(data):
+            if y.shape[0] == 0:
+                continue
+
             x_image = x_image.to(device, non_blocking=True)
             x_scalars = x_scalars.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
@@ -168,6 +171,9 @@ def test(dataloader, target_transform, model, loss_fn, epoch):
 
     with torch.no_grad():
         for (x_image, x_scalars), y in data:
+            if y.shape[0] == 0:
+                continue
+
             x_image = x_image.to(device, non_blocking=True)
             x_scalars = x_scalars.to(device, non_blocking=True)
             if target_transform is not None:
