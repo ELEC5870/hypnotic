@@ -31,22 +31,28 @@ def seed_prngs(random_seed):
         np.random.seed(0)
 
 
-def dataloaders():
-    transform = transforms.Compose(
+def image_transform(pu):
+    pu = transforms.Compose(
         [
             transforms.Grayscale(),
             transforms.ToImage(),
             transforms.ToDtype(torch.float32, scale=True),
         ]
-    )
+    )(pu)
+    pu -= pu.mean()
+    std = pu.std()
+    if std != 0:
+        pu /= std
+    return pu
 
-    # @TODO: Split into training and testing datasets
+
+def dataloaders():
     filter = (pc.field("w") == args.width) & (pc.field("h") == args.height)
     training_dataset = ParquetRDDataset(
         args.image_path,
         args.parquet_path,
         filter=filter,
-        transform=transform,
+        transform=image_transform,
         target_transform=target_transform,
         deterministic=not args.random_seed,
     )
@@ -56,7 +62,7 @@ def dataloaders():
         args.image_path,
         args.parquet_path,
         filter=filter,
-        transform=transform,
+        transform=image_transform,
         offset=training_dataset.limit,
         deterministic=not args.random_seed,
     )
