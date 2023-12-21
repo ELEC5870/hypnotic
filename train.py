@@ -268,11 +268,11 @@ if __name__ == "__main__":
 
     # define evaluation functions
     if args.loss_function == "mse":
-        target_transform = torch.log
+        target_transform = None
         loss_fn = nn.MSELoss()
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
-        target_transform = lambda y: y.argmin(1)
+        target_transform = lambda y: (-(y - y.mean(dim=1)) / y.std(dim=1)).softmax(1)
         loss_fn = nn.CrossEntropyLoss()
         sel_fn = lambda pred: pred.argmax(1)
     rd_cost_fn = (
