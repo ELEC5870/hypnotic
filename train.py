@@ -50,34 +50,28 @@ def dataloaders():
     filter = (pc.field("w") == args.width) & (pc.field("h") == args.height)
     training_dataset = ParquetRDDataset(
         args.image_path,
-        args.parquet_path,
+        args.training_data_path,
         filter=filter,
         transform=image_transform,
         target_transform=target_transform,
         deterministic=not args.random_seed,
     )
-    testing_size = len(training_dataset) // 4
-    training_dataset.limit = len(training_dataset) - testing_size
-    testing_dataset = ParquetRDDataset(
-        args.image_path,
-        args.parquet_path,
-        filter=filter,
-        transform=image_transform,
-        offset=training_dataset.limit,
-        deterministic=not args.random_seed,
-    )
-
     training_dataloader = DataLoader(
         training_dataset,
-        batch_size=None,
-        batch_sampler=None,
+        batch_size=32,
         generator=generator,
     )
 
+    testing_dataset = ParquetRDDataset(
+        args.image_path,
+        args.testing_data_path,
+        filter=filter,
+        transform=image_transform,
+        deterministic=not args.random_seed,
+    )
     testing_dataloader = DataLoader(
         testing_dataset,
-        batch_size=None,
-        batch_sampler=None,
+        batch_size=32,
         generator=generator,
     )
 
@@ -89,8 +83,8 @@ def tb_write_meta():
     writer.add_hparams(
         {
             "image_path": args.image_path,
-            "parquet_path": args.parquet_path,
-            "dataset_size": len(training_dataloader),
+            "training_data_path": args.training_data_path,
+            "testing_data_path": args.testing_data_path,
             "learning_rate": args.learning_rate,
             "loss_fn": args.loss_function,
         },
@@ -106,7 +100,6 @@ def tb_write_meta():
 
     # dataset info
     (x_image, x_scalars), y = next(iter(training_dataloader))
-    log(f"{len(training_dataloader)=}")
     log(f"{x_image.shape=} {x_image.dtype=}")
     log(f"{x_scalars.shape=} {x_scalars.dtype=}")
     log(f"{y.shape=} {y.dtype=}")
@@ -131,12 +124,17 @@ def train(dataloader, model, loss_fn, optimizer, epoch, profile=False):
     )
     with profiler if profile else nullcontext() as profiler:
         for i, ((x_image, x_scalars), y) in enumerate(data):
-            if y.shape[0] == 0:
-                continue
+            x_image = x_image.to(device)
+            x_scalars = x_scalars.to(device)
+            y = y.to(device)
 
-            x_image = x_image.to(device, non_blocking=True)
-            x_scalars = x_scalars.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+            # validate input
+            if x_image.isnan().any() or x_image.isinf().any():
+                raise RuntimeError(f"x_image is {x_image}")
+            if x_scalars.isnan().any() or x_scalars.isinf().any():
+                raise RuntimeError(f"x_scalars is {x_scalars}")
+            if y.isnan().any() or y.isinf().any() or (y < 0).any():
+                raise RuntimeError(f"y is {y}")
 
             optimizer.zero_grad(set_to_none=True)
 
@@ -148,8 +146,9 @@ def train(dataloader, model, loss_fn, optimizer, epoch, profile=False):
             loss.backward()
             optimizer.step()
 
+            # @TODO: Bring back training loss
             # monitoring
-            writer.add_scalar("training_loss", loss, epoch * num_batches + i)
+            # writer.add_scalar("training_loss", loss, epoch * batches + i)
             if profiler is not None:
                 profiler.step()
 
@@ -170,28 +169,35 @@ def test(dataloader, target_transform, model, loss_fn, epoch):
     model.eval()
 
     num_samples = 0
-    num_batches = len(dataloader)
     data = tqdm(dataloader, desc=f"testing epoch {epoch}", disable=args.quiet)
     test_losses, correct, rd_costs = [], 0, []
     cm = np.zeros((67, 67), dtype=np.int64)
 
     with torch.no_grad():
         for (x_image, x_scalars), y in data:
-            if y.shape[0] == 0:
-                continue
-
-            x_image = x_image.to(device, non_blocking=True)
-            x_scalars = x_scalars.to(device, non_blocking=True)
+            x_image = x_image.to(device)
+            x_scalars = x_scalars.to(device)
             if target_transform is not None:
-                tx_y = target_transform(y).to(device, non_blocking=True)
+                tx_y = torch.stack([target_transform(yi) for yi in y]).to(device)
             else:
-                tx_y = y.to(device, non_blocking=True)
+                tx_y = y.to(device)
             num_samples += x_image.shape[0]
+
+            # validate input
+            if x_image.isnan().any() or x_image.isinf().any():
+                raise RuntimeError(f"x_image is {x_image}")
+            if x_scalars.isnan().any() or x_scalars.isinf().any():
+                raise RuntimeError(f"x_scalars is {x_scalars}")
+            if y.isnan().any() or y.isinf().any() or (y < 0).any():
+                raise RuntimeError(f"y is {y}")
 
             pred = model(x_image, x_scalars)
 
-            # update metrics
             loss = loss_fn(pred, tx_y)
+            if loss.isnan().any() or loss.isinf().any() or (loss < 0).any():
+                raise RuntimeError(f"loss is {loss}")
+
+            # update metrics
             test_losses.append(loss)
             correct += correct_fn(pred, tx_y)
             cm += confusion_matrix(
@@ -200,7 +206,7 @@ def test(dataloader, target_transform, model, loss_fn, epoch):
             rd_costs.append(rd_cost_fn(pred, y))
 
     # @NOTE: This is a mean of means, which is a bit wrong
-    mean_test_loss = sum(test_losses) / num_batches
+    mean_test_loss = torch.stack(test_losses).mean()
     writer.add_scalar("testing_loss", mean_test_loss, epoch)
     writer.add_histogram(
         "testing_loss_distribution",
@@ -228,8 +234,9 @@ if __name__ == "__main__":
     # fmt: off
     parser = argparse.ArgumentParser()
     parser.add_argument("image_path", type=str)
-    parser.add_argument("parquet_path", type=str)
-    parser.add_argument("--learning-rate", type=float, default=1e-3)
+    parser.add_argument("training_data_path", type=str)
+    parser.add_argument("testing_data_path", type=str)
+    parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--data-loader-workers", type=int, default=2)
     parser.add_argument("--random-seed", action="store_true")
@@ -272,7 +279,7 @@ if __name__ == "__main__":
         loss_fn = nn.MSELoss()
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
-        target_transform = lambda y: (-(y - y.mean(dim=1)) / y.std(dim=1)).softmax(1)
+        target_transform = lambda y: (-(y - y.mean()) / y.std()).softmax(0)
         loss_fn = nn.CrossEntropyLoss()
         sel_fn = lambda pred: pred.argmax(1)
     rd_cost_fn = (
