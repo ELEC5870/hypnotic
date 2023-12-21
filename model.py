@@ -3,6 +3,16 @@ import torch.nn as nn
 from torchvision.models import resnet50
 
 
+class NullModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, image, scalars):
+        ret = torch.zeros((image.shape[0], 67))
+        ret[:, 0] = 1
+        return ret.to(image.device)
+
+
 class LaudeAndOstermann(nn.Module):
     def __init__(self, pu_size=(32, 32), num_classes=67):
         super().__init__()

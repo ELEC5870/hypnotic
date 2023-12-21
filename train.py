@@ -19,7 +19,7 @@ from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
 
 from dataset import ParquetRDDataset
-from model import LaudeAndOstermannPlusScalars
+from model import NullModel, LaudeAndOstermannPlusScalars
 
 
 def seed_prngs(random_seed):
@@ -284,6 +284,8 @@ if __name__ == "__main__":
     # load dataset
     training_dataloader, testing_dataloader = dataloaders()
     (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
+
+    test(testing_dataloader, target_transform, NullModel().to(device), loss_fn, 0)
 
     # define model
     model = LaudeAndOstermannPlusScalars(
