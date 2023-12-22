@@ -217,6 +217,7 @@ def test(dataloader, target_transform, model, loss_fn, epoch):
     correct /= num_samples
     writer.add_scalar("accuracy", correct, epoch)
 
+    cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
     cm = plot_confusion_matrix(cm)
     writer.add_figure("confusion_matrix", cm, epoch)
 
