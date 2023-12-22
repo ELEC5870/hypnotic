@@ -109,7 +109,7 @@ def tb_write_meta():
     writer.flush()
 
 
-def train(dataloader, model, loss_fn, optimizer, epoch, profile=False):
+def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False):
     model.train()
 
     log()
@@ -165,7 +165,7 @@ def plot_confusion_matrix(cm):
     return plt.gcf()
 
 
-def test(dataloader, target_transform, model, loss_fn, epoch):
+def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
     model.eval()
 
     num_samples = 0
@@ -224,6 +224,8 @@ def test(dataloader, target_transform, model, loss_fn, epoch):
     mean_rd_cost = torch.cat(rd_costs).mean()
     writer.add_scalar("rd_cost", mean_rd_cost, epoch)
 
+    scheduler.step(mean_test_loss)
+
     log(
         f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%, RD cost vs optimal: {100 * mean_rd_cost:.2f}%"
     )
@@ -242,7 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-loader-workers", type=int, default=2)
     parser.add_argument("--random-seed", action="store_true")
     parser.add_argument("--resume", type=str)
-    parser.add_argument("--loss-function", default="mse", choices=["mse", "crossentropy"])
+    parser.add_argument("--loss-function", default="crossentropy", choices=["mse", "crossentropy"])
     parser.add_argument("--width", type=int, default=16)
     parser.add_argument("--height", type=int, default=16)
     parser.add_argument("--quiet", "-q", action="store_true")
@@ -304,27 +306,43 @@ if __name__ == "__main__":
 
     # training hyperparameters
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=4)
 
+    start_epoch = 0
     if args.resume:
         checkpoint = torch.load(args.resume)
         model.load_state_dict(checkpoint["model_state_dict"])
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_epoch = checkpoint["epoch"]
         log(f"resuming from epoch {start_epoch}")
 
     tb_write_meta()
 
     # train and test loop
-    epochs = range(args.epochs) if args.epochs > 0 else itertools.count(1)
+    epochs = (
+        range(start_epoch, args.epochs)
+        if args.epochs > 0
+        else itertools.count(start_epoch)
+    )
     for t in epochs:
-        train(training_dataloader, model, loss_fn, optimizer, t, args.profile)
-        test(testing_dataloader, target_transform, model, loss_fn, t)
+        train(
+            training_dataloader,
+            model,
+            loss_fn,
+            optimizer,
+            scheduler,
+            t,
+            args.profile,
+        )
+        test(testing_dataloader, target_transform, model, loss_fn, scheduler, t)
 
         torch.save(
             {
                 "epoch": t,
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
             },
             os.path.join(run_dir, f"checkpoint.pt"),
         )
