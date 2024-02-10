@@ -113,7 +113,6 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
     model.train()
 
     log()
-    num_batches = len(dataloader.dataset)
     data = tqdm(dataloader, desc=f"training epoch {epoch}", disable=args.quiet)
     profiler = torch.profiler.profile(
         activities=[torch.profiler.ProfilerActivity.CPU],
@@ -224,7 +223,8 @@ def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
     mean_rd_cost = torch.cat(rd_costs).mean()
     writer.add_scalar("rd_cost", mean_rd_cost, epoch)
 
-    scheduler.step(mean_test_loss)
+    if scheduler is not None:
+        scheduler.step(mean_test_loss)
 
     log(
         f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%, RD cost vs optimal: {100 * mean_rd_cost:.2f}%"
@@ -295,7 +295,14 @@ if __name__ == "__main__":
     training_dataloader, testing_dataloader = dataloaders()
     (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
 
-    test(testing_dataloader, target_transform, NullModel().to(device), loss_fn, 0)
+    test(
+        testing_dataloader,
+        target_transform,
+        NullModel().to(device),
+        loss_fn,
+        None,
+        0,
+    )
 
     # define model
     model = LaudeAndOstermannPlusScalars(
