@@ -76,3 +76,36 @@ class LaudeAndOstermannPlusScalars(nn.Module):
         pred = self.layer7(pred)
         pred = self.layer8(pred)
         return pred
+
+
+class Custom(nn.Module):
+    def __init__(self, num_scalars=11, num_classes=67):
+        super().__init__()
+        # fmt: off
+        self.layer1 = nn.Conv2d(in_channels=1, out_channels=96,
+                                kernel_size=4, stride=1,
+                                padding="same",padding_mode="replicate")
+        self.layer2 = nn.ReLU()
+        self.layer3 = nn.Conv2d(in_channels=96, out_channels=256,
+                                kernel_size=5, stride=1,
+                                padding="same", padding_mode="replicate")
+        self.layer4 = nn.ReLU()
+        self.layer5 = nn.AdaptiveAvgPool2d(32)
+        self.layer6 = nn.Linear(in_features=32 * 32 * 256 + num_scalars,
+                                out_features=1024)
+        self.layer7 = nn.ReLU()
+        self.layer8 = nn.Linear(in_features=1024, out_features=67)
+        # fmt: on
+
+    def forward(self, image, scalars):
+        pred = self.layer1(image)
+        pred = self.layer2(pred)
+        pred = self.layer3(pred)
+        pred = self.layer4(pred)
+        pred = self.layer5(pred)
+        pred = pred.flatten(start_dim=1)
+        pred = torch.cat([pred, scalars], dim=1)
+        pred = self.layer6(pred)
+        pred = self.layer7(pred)
+        pred = self.layer8(pred)
+        return pred

@@ -19,7 +19,9 @@ from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
 
 from dataset import ParquetRDDataset
-from model import NullModel, LaudeAndOstermannPlusScalars
+from model import NullModel, Custom
+
+BATCH_SIZE = 32
 
 
 def seed_prngs(random_seed):
@@ -47,31 +49,26 @@ def image_transform(pu):
 
 
 def dataloaders():
-    filter = (pc.field("w") == args.width) & (pc.field("h") == args.height)
     training_dataset = ParquetRDDataset(
         args.image_path,
         args.training_data_path,
-        filter=filter,
         transform=image_transform,
         target_transform=target_transform,
         deterministic=not args.random_seed,
     )
     training_dataloader = DataLoader(
         training_dataset,
-        batch_size=32,
         generator=generator,
     )
 
     testing_dataset = ParquetRDDataset(
         args.image_path,
         args.testing_data_path,
-        filter=filter,
         transform=image_transform,
         deterministic=not args.random_seed,
     )
     testing_dataloader = DataLoader(
         testing_dataset,
-        batch_size=32,
         generator=generator,
     )
 
@@ -135,7 +132,8 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
             if y.isnan().any() or y.isinf().any() or (y < 0).any():
                 raise RuntimeError(f"y is {y}")
 
-            optimizer.zero_grad(set_to_none=True)
+            if i % BATCH_SIZE == BATCH_SIZE - 1:
+                optimizer.zero_grad(set_to_none=True)
 
             # compute loss
             pred = model(x_image, x_scalars)
@@ -143,7 +141,8 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
 
             # backpropagation
             loss.backward()
-            optimizer.step()
+            if i % BATCH_SIZE == BATCH_SIZE - 1:
+                optimizer.step()
 
             # @TODO: Bring back training loss
             # monitoring
@@ -245,8 +244,6 @@ if __name__ == "__main__":
     parser.add_argument("--random-seed", action="store_true")
     parser.add_argument("--resume", type=str)
     parser.add_argument("--loss-function", default="crossentropy", choices=["mse", "crossentropy"])
-    parser.add_argument("--width", type=int, default=16)
-    parser.add_argument("--height", type=int, default=16)
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--profile", "-p", action="store_true")
     args = parser.parse_args()
@@ -305,11 +302,7 @@ if __name__ == "__main__":
     )
 
     # define model
-    model = LaudeAndOstermannPlusScalars(
-        pu_size=(x_image_example.shape[2], x_image_example.shape[3]),
-        num_scalars=x_scalars_example.shape[1],
-    )
-    model = model.to(device)
+    model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
 
     # training hyperparameters
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
