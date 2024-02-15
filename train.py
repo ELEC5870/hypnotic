@@ -303,6 +303,9 @@ if __name__ == "__main__":
 
     # define model
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
+    model = torch.jit.trace(
+        model, (x_image_example.to(device), x_scalars_example.to(device))
+    )
 
     # training hyperparameters
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
@@ -310,8 +313,8 @@ if __name__ == "__main__":
 
     start_epoch = 0
     if args.resume:
-        checkpoint = torch.load(args.resume)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model = torch.jit.load(os.path.join(args.resume, "model.pt"))
+        checkpoint = torch.load(os.path.join(args.resume, "checkpoint.pt"))
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_epoch = checkpoint["epoch"]
@@ -340,10 +343,10 @@ if __name__ == "__main__":
         torch.save(
             {
                 "epoch": t,
-                "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "scheduler_state_dict": scheduler.state_dict(),
             },
             os.path.join(run_dir, f"checkpoint.pt"),
         )
+        model.save(os.path.join(run_dir, f"model.pt"))
         writer.flush()
