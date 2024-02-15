@@ -19,6 +19,9 @@ def prepare_batch(batch, predictors, reduction, pbar):
     )
 
     sample = random.sample(range(len(table)), int(len(table) * (1 - reduction)))
+    if not sample:
+        pbar.update(rows)
+        return pa.RecordBatch.from_pylist([], table.schema)
     table = table.take(sample)
 
     batches = table.to_batches()
