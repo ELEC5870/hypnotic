@@ -90,8 +90,8 @@ class Custom(nn.Module):
                                 kernel_size=5, stride=1,
                                 padding="same", padding_mode="replicate")
         self.layer4 = nn.ReLU()
-        self.layer5 = nn.AdaptiveAvgPool2d(32)
-        self.layer6 = nn.Linear(in_features=32 * 32 * 256 + num_scalars,
+        self.layer5 = nn.AdaptiveAvgPool2d(2)
+        self.layer6 = nn.Linear(in_features=2 * 2 * 256 + num_scalars,
                                 out_features=1024)
         self.layer7 = nn.ReLU()
         self.layer8 = nn.Linear(in_features=1024, out_features=67)
