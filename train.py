@@ -19,7 +19,7 @@ from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
 
 from dataset import ParquetRDDataset
-from model import NullModel, Custom
+from model import Custom
 
 BATCH_SIZE = 32
 
@@ -291,15 +291,6 @@ if __name__ == "__main__":
     # load dataset
     training_dataloader, testing_dataloader = dataloaders()
     (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
-
-    test(
-        testing_dataloader,
-        target_transform,
-        NullModel().to(device),
-        loss_fn,
-        None,
-        0,
-    )
 
     # define model
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
