@@ -89,6 +89,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
 
         scalars = torch.tensor(
             [
+                row["lambda"],
                 row["isp_mode"],
                 row["multi_ref_idx"],
                 row["mip_flag"],
