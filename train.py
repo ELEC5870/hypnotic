@@ -244,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--random-seed", action="store_true")
     parser.add_argument("--resume", type=str)
     parser.add_argument("--loss-function", default="crossentropy", choices=["mse", "crossentropy"])
+    parser.add_argument("--temperature", type=float, default=10)
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--profile", "-p", action="store_true")
     args = parser.parse_args()
@@ -279,7 +280,9 @@ if __name__ == "__main__":
         loss_fn = nn.MSELoss()
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
-        target_transform = lambda y: (-(y - y.mean()) / y.std()).softmax(0)
+        target_transform = lambda y: (
+            -(y - y.mean()) / y.std() * args.temperature
+        ).softmax(0)
         loss_fn = nn.CrossEntropyLoss()
         sel_fn = lambda pred: pred.argmax(1)
     rd_cost_fn = (
