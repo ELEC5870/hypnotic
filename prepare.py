@@ -1,56 +1,73 @@
+from itertools import chain
+import os
 import random
 
 import pyarrow as pa
-import pyarrow.compute as pc
+import pyarrow.parquet as pq
 import pyarrow.dataset as ds
-import tqdm
 
 RESPONSES = ["cost", "dist", "fracBits"]
+META_SCHEMA = pa.schema(
+    [
+        ("qp", pa.uint8()),
+        ("sequence", pa.string()),
+    ]
+)
 
 
-def prepare_batch(batch, predictors, reduction, pbar):
+def prepare_batch(batch, meta, reduction):
     table = pa.Table.from_batches([batch])
-    rows = len(table)
 
-    # @TODO: Check this is actually doing what I think this is doing - are the two lists
-    #        associated with one other?
-    table = table.group_by(predictors).aggregate(
-        [(col, "list") for col in RESPONSES + ["intra_mode"]]
-    )
+    for key, value in meta.items():
+        field = META_SCHEMA.field(key)
+        table = table.append_column(field, pa.array([value] * len(batch), field.type))
 
-    sample = random.sample(range(len(table)), int(len(table) * (1 - reduction)))
+    sample = []
+    for i in range(len(batch)):
+        if random.random() >= reduction:
+            sample.append(i)
     if not sample:
-        pbar.update(rows)
-        return pa.RecordBatch.from_pylist([], table.schema)
+        return pa.RecordBatch.from_pylist([], schema=table.schema)
     table = table.take(sample)
 
     batches = table.to_batches()
     if len(batches) > 1:
-        raise Exception("More than one batch")
-    pbar.update(rows)
-    return batches[0]
+        raise ValueError("Expected a single batch")
+    batch = batches[0]
+    return batch
 
 
-def prepare_dataset(dataset, output_path, reduction, quiet=True):
-    columns = dataset.schema.names
-    predictors = [c for c in columns if c not in RESPONSES + ["intra_mode"]]
-    batch_size = 131072
-    batches = dataset.to_batches(batch_size=batch_size)
-    pbar = tqdm.tqdm(total=dataset.count_rows(), disable=quiet)
+def prepare_dataset(input_path, output_path, reduction, quiet=True):
+    if os.path.isdir(input_path):
+        filepaths = [
+            os.path.join(dirpath, filename)
+            for dirpath, _, filenames in os.walk(input_path)
+            for filename in filenames
+        ]
+    else:
+        filepaths = [input_path]
 
-    schema = dataset.schema
-    for c in RESPONSES:
-        schema = schema.remove(schema.get_field_index(c))
-        schema = schema.insert(
-            0, pa.field(f"{c}_list", pa.list_(pa.float32()), nullable=False)
-        )
-    schema = schema.remove(schema.get_field_index("intra_mode"))
-    schema = schema.insert(
-        0, pa.field("intra_mode_list", pa.list_(pa.int32()), nullable=False)
-    )
+    def get_meta(filepath):
+        meta = {}
+        name = os.path.splitext(os.path.basename(filepath))[0]
+        qp, sequence = name.split("_", 1)
+        meta["qp"] = int(qp)
+        meta["sequence"] = sequence
+        return meta
 
+    schema = pq.read_schema(filepaths[0])
+    for field in META_SCHEMA:
+        schema = schema.append(field)
     ds.write_dataset(
-        map(lambda b: prepare_batch(b, predictors, reduction, pbar), batches),
+        chain(
+            *(
+                map(
+                    lambda b: prepare_batch(b, get_meta(filepath), reduction),
+                    ds.dataset(filepath, format="parquet").to_batches(),
+                )
+                for filepath in filepaths
+            )
+        ),
         output_path,
         format="parquet",
         schema=schema,
@@ -67,15 +84,4 @@ if __name__ == "__main__":
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
-    partitioning = pa.dataset.partitioning(
-        flavor="filename",
-        schema=pa.schema([("sequence", pa.string())]),
-    )
-    dataset = ds.dataset(
-        args.input,
-        format="parquet",
-        partitioning=partitioning,
-        exclude_invalid_files=True,
-    )
-
-    prepare_dataset(dataset, args.output, args.reduction, args.quiet)
+    prepare_dataset(args.input, args.output, args.reduction, args.quiet)

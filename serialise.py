@@ -14,6 +14,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from tqdm import tqdm
 
+
 RD_LINE_PATTERN = re.compile(
     r"IntraCost T "
     r"x=(\d+),"
@@ -38,17 +39,19 @@ RD_LINE_PATTERN = re.compile(
     r"mpm_pred5=(\d+)"
 )
 
+NUM_MODES = 67
+
 RD_SCHEMA = pa.schema(
     [
         pa.field("x", pa.uint16()),
         pa.field("y", pa.uint16()),
         pa.field("w", pa.uint16()),
         pa.field("h", pa.uint16()),
-        pa.field("cost", pa.float32()),
-        pa.field("dist", pa.float32()),
-        pa.field("fracBits", pa.float32()),
+        pa.field("cost", pa.list_(pa.float32(), NUM_MODES)),
+        pa.field("dist", pa.list_(pa.float32(), NUM_MODES)),
+        pa.field("fracBits", pa.list_(pa.float32(), NUM_MODES)),
         pa.field("lambda", pa.float32()),
-        pa.field("intra_mode", pa.uint8()),
+        # pa.field("intra_mode", pa.list_(pa.uint8(), NUM_MODES)),
         pa.field("isp_mode", pa.int8()),
         pa.field("multi_ref_idx", pa.uint8()),
         pa.field("mip_flag", pa.bool_()),
@@ -62,6 +65,13 @@ RD_SCHEMA = pa.schema(
         pa.field("mpm5", pa.uint8()),
     ]
 )
+
+
+AGGREGATES = [
+    "cost",
+    "dist",
+    "fracBits",
+]
 
 
 def _match_to_dict(match):
@@ -131,34 +141,39 @@ class RowReader:
         self.file.close()
 
 
-def row_size(schema):
-    """Return the size of a row in bytes."""
-    return sum(
-        field.type.bit_width // 8
-        for field in schema
-        if field.type.bit_width is not None
-    )
-
-
-class RowGroupReader:
-    """Iterator which groups rows from a raw trace file into groups,
-    each approximately `row_group_size` bytes."""
-
-    def __init__(self, path, schema, row_group_size=33554432):
+class BlockReader:
+    def __init__(self, path, schema):
         self.row_reader = RowReader(path)
-        self.row_group_nrows = (row_group_size) // row_size(schema)
         self.schema = schema
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        rows = [row for _, row in zip(range(self.row_group_nrows), self.row_reader)]
-        if len(rows) == 0:
+        pylist = next(self.row_reader)
+        if not pylist:
             raise StopIteration
-        columns = [pa.array([row[field.name] for row in rows]) for field in self.schema]
-        row_group = pa.RecordBatch.from_arrays(columns, schema=self.schema)
-        return row_group
+
+        for key in AGGREGATES:
+            val = pylist[key]
+            pylist[key] = [None] * NUM_MODES
+            pylist[key][pylist["intra_mode"]] = val
+        del pylist["intra_mode"]
+
+        for _ in range(NUM_MODES - 1):
+            row = next(self.row_reader)
+            if not row:
+                raise StopIteration
+
+            for key in pylist.keys() - AGGREGATES:
+                if row[key] != pylist[key]:
+                    raise ValueError(f"Mismatched {key}: {row[key]} != {pylist[key]}")
+
+            for key in AGGREGATES:
+                if pylist[key][row["intra_mode"]] is not None:
+                    raise ValueError(f"Duplicate {key} for mode {row['intra_mode']}")
+                pylist[key][row["intra_mode"]] = row[key]
+        return pylist
 
     def __enter__(self):
         return self
@@ -169,6 +184,51 @@ class RowGroupReader:
     def close(self):
         """Close the underlying `RowReader`"""
         self.row_reader.close()
+
+
+def row_size(schema):
+    """Return the size of a row in bytes."""
+    size = 0
+    for field in schema:
+        if pa.types.is_fixed_size_list(field.type):
+            size += field.type.value_type.bit_width * NUM_MODES
+            continue
+        if field.type.bit_width is None:
+            raise ValueError(f"Field {field.name} has no bit width")
+        size += field.type.bit_width
+    return size // 8
+
+
+class RowGroupReader:
+    """Iterator which groups rows from a raw trace file into groups,
+    each approximately `row_group_size` bytes."""
+
+    def __init__(self, path, schema, row_group_size=33554432):
+        self.block_reader = BlockReader(path, schema)
+        self.row_group_nrows = (row_group_size) // row_size(schema)
+        self.schema = schema
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        blocks = [
+            block for _, block in zip(range(self.row_group_nrows), self.block_reader)
+        ]
+        if len(blocks) == 0:
+            raise StopIteration
+        row_group = pa.RecordBatch.from_pylist(blocks, schema=self.schema)
+        return row_group
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
+        """Close the underlying `RowReader`"""
+        self.block_reader.close()
 
 
 # Pylint shouldn't count named arguments with default values towards the
@@ -194,7 +254,7 @@ def rd_dump_to_parquet(
             with RowGroupReader(input_path, schema, row_group_size) as reader:
                 for row_group in reader:
                     writer.write_batch(row_group, row_group_size=row_group_size)
-                    pbar.update(reader.row_reader.file.tell() - pbar.n)
+                    pbar.update(reader.block_reader.row_reader.file.tell() - pbar.n)
 
 
 if __name__ == "__main__":

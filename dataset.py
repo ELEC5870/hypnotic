@@ -69,10 +69,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         return predictors
 
     def _get_batches(self):
-        filter = pc.list_value_length(pc.field("intra_mode_list")) == NUM_INTRA_MODES
-        if self.filter is not None:
-            filter &= self.filter
-        return self.dataset.to_batches(filter=filter, batch_size=1024)
+        return self.dataset.to_batches(filter=self.filter, batch_size=1024)
 
     def __iter__(self):
         batches = self._get_batches()
@@ -107,7 +104,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         )
 
         targets = torch.full((NUM_INTRA_MODES,), torch.nan)
-        for intra_mode, cost in zip(row["intra_mode_list"], row["cost_list"]):
+        for intra_mode, cost in enumerate(row["cost"]):
             targets[intra_mode] = cost
         if targets.isnan().any():
             raise ValueError(f"NaN cost(s) in row {row}")
@@ -238,21 +235,15 @@ IntraCost T x=0,y=1,w=2,h=3,cost=66.0,dist=66.0,fracBits=66.0,lambda=1.0,modeId=
             rd_data = RD_TEST_DATA.splitlines()
             random.shuffle(rd_data)
             rd_data = "\n".join(rd_data)
-            rd_path = os.path.join(tmpdir, "data.rd")
+            rd_path = os.path.join(tmpdir, "22_data.rd")
             with open(rd_path, "w") as f:
                 f.write(rd_data)
 
-            parquet_path = os.path.join(tmpdir, "data_.parquet")
+            parquet_path = os.path.join(tmpdir, "22_data.parquet")
             rd_dump_to_parquet(rd_path, parquet_path)
 
-            partitioning = ds.partitioning(
-                flavor="filename", schema=pa.schema([("sequence", pa.string())])
-            )
-            dataset = ds.dataset(
-                parquet_path, format="parquet", partitioning=partitioning
-            )
             prepared_path = os.path.join(tmpdir, "prepared.parquet")
-            prepare_dataset(dataset, prepared_path, 0)
+            prepare_dataset(parquet_path, prepared_path, 0)
 
             dataset = ParquetRDDataset(
                 image_path,
