@@ -235,11 +235,11 @@ IntraCost T x=0,y=1,w=2,h=3,cost=66.0,dist=66.0,fracBits=66.0,lambda=1.0,modeId=
             rd_data = RD_TEST_DATA.splitlines()
             random.shuffle(rd_data)
             rd_data = "\n".join(rd_data)
-            rd_path = os.path.join(tmpdir, "22_data.rd")
+            rd_path = os.path.join(tmpdir, "data_22.rd")
             with open(rd_path, "w") as f:
                 f.write(rd_data)
 
-            parquet_path = os.path.join(tmpdir, "22_data.parquet")
+            parquet_path = os.path.join(tmpdir, "data_22.parquet")
             rd_dump_to_parquet(rd_path, parquet_path)
 
             prepared_path = os.path.join(tmpdir, "prepared.parquet")

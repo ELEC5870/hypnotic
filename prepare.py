@@ -9,8 +9,8 @@ import pyarrow.dataset as ds
 RESPONSES = ["cost", "dist", "fracBits"]
 META_SCHEMA = pa.schema(
     [
-        ("qp", pa.uint8()),
         ("sequence", pa.string()),
+        ("qp", pa.uint8()),
     ]
 )
 
@@ -50,9 +50,9 @@ def prepare_dataset(input_path, output_path, reduction, quiet=True):
     def get_meta(filepath):
         meta = {}
         name = os.path.splitext(os.path.basename(filepath))[0]
-        qp, sequence = name.split("_", 1)
-        meta["qp"] = int(qp)
+        sequence, qp = name.rsplit("_", 1)
         meta["sequence"] = sequence
+        meta["qp"] = int(qp)
         return meta
 
     schema = pq.read_schema(filepaths[0])
