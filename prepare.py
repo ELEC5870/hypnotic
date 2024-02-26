@@ -59,14 +59,12 @@ def prepare_dataset(input_path, output_path, reduction, quiet=True):
     for field in META_SCHEMA:
         schema = schema.append(field)
     ds.write_dataset(
-        chain(
-            *(
-                map(
-                    lambda b: prepare_batch(b, get_meta(filepath), reduction),
-                    ds.dataset(filepath, format="parquet").to_batches(),
-                )
-                for filepath in filepaths
+        chain.from_iterable(
+            map(
+                lambda b: prepare_batch(b, get_meta(filepath), reduction),
+                ds.dataset(filepath, format="parquet").to_batches(batch_size=1024),
             )
+            for filepath in filepaths
         ),
         output_path,
         format="parquet",
