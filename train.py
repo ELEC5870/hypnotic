@@ -310,7 +310,8 @@ if __name__ == "__main__":
         model = torch.jit.load(os.path.join(args.resume, "model.pt"))
         checkpoint = torch.load(os.path.join(args.resume, "checkpoint.pt"))
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if scheduler is not None:
+            scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         start_epoch = checkpoint["epoch"]
         log(f"resuming from epoch {start_epoch}")
 
@@ -334,12 +335,14 @@ if __name__ == "__main__":
         )
         test(testing_dataloader, target_transform, model, loss_fn, scheduler, t)
 
+        checkpoint_data = {
+            "epoch": t,
+            "optimizer_state_dict": optimizer.state_dict(),
+        }
+        if scheduler is not None:
+            checkpoint_data["scheduler_state_dict"] = scheduler.state_dict()
         torch.save(
-            {
-                "epoch": t,
-                "optimizer_state_dict": optimizer.state_dict(),
-                "scheduler_state_dict": scheduler.state_dict(),
-            },
+            checkpoint_data,
             os.path.join(run_dir, f"checkpoint.pt"),
         )
         model.save(os.path.join(run_dir, f"model.pt"))
