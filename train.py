@@ -22,6 +22,7 @@ from dataset import ParquetRDDataset
 from model import Custom
 
 BATCH_SIZE = 32
+VALIDATE = False
 
 
 def seed_prngs(random_seed):
@@ -125,12 +126,13 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
             y = y.to(device)
 
             # validate input
-            if x_image.isnan().any() or x_image.isinf().any():
-                raise RuntimeError(f"x_image is {x_image}")
-            if x_scalars.isnan().any() or x_scalars.isinf().any():
-                raise RuntimeError(f"x_scalars is {x_scalars}")
-            if y.isnan().any() or y.isinf().any() or (y < 0).any():
-                raise RuntimeError(f"y is {y}")
+            if VALIDATE:
+                if x_image.isnan().any() or x_image.isinf().any():
+                    raise RuntimeError(f"x_image is {x_image}")
+                if x_scalars.isnan().any() or x_scalars.isinf().any():
+                    raise RuntimeError(f"x_scalars is {x_scalars}")
+                if y.isnan().any() or y.isinf().any() or (y < 0).any():
+                    raise RuntimeError(f"y is {y}")
 
             if i % BATCH_SIZE == 0:
                 optimizer.step()
@@ -181,12 +183,13 @@ def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
             num_samples += x_image.shape[0]
 
             # validate input
-            if x_image.isnan().any() or x_image.isinf().any():
-                raise RuntimeError(f"x_image is {x_image}")
-            if x_scalars.isnan().any() or x_scalars.isinf().any():
-                raise RuntimeError(f"x_scalars is {x_scalars}")
-            if y.isnan().any() or y.isinf().any() or (y < 0).any():
-                raise RuntimeError(f"y is {y}")
+            if VALIDATE:
+                if x_image.isnan().any() or x_image.isinf().any():
+                    raise RuntimeError(f"x_image is {x_image}")
+                if x_scalars.isnan().any() or x_scalars.isinf().any():
+                    raise RuntimeError(f"x_scalars is {x_scalars}")
+                if y.isnan().any() or y.isinf().any() or (y < 0).any():
+                    raise RuntimeError(f"y is {y}")
 
             pred = model(x_image, x_scalars)
 
