@@ -1,3 +1,4 @@
+from collections import defaultdict
 from itertools import islice
 import os
 import random
@@ -20,6 +21,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         self,
         image_path,
         parquet_path,
+        batch_size=32,
         filter=None,
         transform=None,
         target_transform=None,
@@ -32,6 +34,8 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         self.transform = transform
         self.target_transform = target_transform
         self.deterministic = deterministic
+        self.batch_size = batch_size
+        self.batches = defaultdict(list)
 
     def _load_image(self, path):
         sequence = os.path.splitext(os.path.basename(path))[0]
@@ -71,11 +75,27 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
     def _get_batches(self):
         return self.dataset.to_batches(filter=self.filter, batch_size=1024)
 
+    def _get_batch(self, size):
+        batch = self.batches.pop(size)
+        images, scalars, targets = zip(*batch)
+        return (
+            (
+                torch.stack(images),
+                torch.stack(scalars),
+            ),
+            torch.stack(targets),
+        )
+
     def __iter__(self):
         batches = self._get_batches()
         for batch in batches:
             for row in batch.to_pylist():
-                yield self._modify_row(row)
+                size = (row["w"], row["h"])
+                self.batches[size].append(self._modify_row(row))
+                if len(self.batches[size]) >= self.batch_size:
+                    yield self._get_batch(size)
+        for size in self.batches.keys():
+            yield self._get_batch(size)
 
     def _modify_row(self, row):
         # @TODO: Remove this.
@@ -112,7 +132,11 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         if self.target_transform:
             targets = self.target_transform(targets)
 
-        return (image, scalars), targets
+        return (
+            image,
+            scalars,
+            targets,
+        )
 
 
 if __name__ == "__main__":
@@ -253,6 +277,7 @@ IntraCost T x=0,y=1,w=2,h=3,cost=66.0,dist=66.0,fracBits=66.0,lambda=1.0,modeId=
             )
 
             (image, scalars), target = next(iter(dataset))
+            image, scalars, target = image[0], scalars[0], target[0]
             self.assertTrue(image.count_nonzero() == 0)
             for mode_id, cost in enumerate(target):
                 self.assertEqual(cost, NUM_INTRA_MODES - mode_id - 1)

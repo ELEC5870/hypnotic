@@ -56,10 +56,12 @@ def dataloaders():
         transform=image_transform,
         target_transform=target_transform,
         deterministic=not args.random_seed,
+        batch_size=BATCH_SIZE,
     )
     training_dataloader = DataLoader(
         training_dataset,
         generator=generator,
+        batch_size=None,
     )
 
     testing_dataset = ParquetRDDataset(
@@ -67,10 +69,12 @@ def dataloaders():
         args.testing_data_path,
         transform=image_transform,
         deterministic=not args.random_seed,
+        batch_size=BATCH_SIZE,
     )
     testing_dataloader = DataLoader(
         testing_dataset,
         generator=generator,
+        batch_size=None,
     )
 
     return (training_dataloader, testing_dataloader)
@@ -121,9 +125,13 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
     )
     with profiler if profile else nullcontext() as profiler:
         for i, ((x_image, x_scalars), y) in enumerate(data):
+            optimizer.zero_grad(set_to_none=True)
+
             x_image = x_image.to(device)
             x_scalars = x_scalars.to(device)
             y = y.to(device)
+
+            optimizer.zero_grad(set_to_none=True)
 
             # validate input
             if VALIDATE:
@@ -134,16 +142,13 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
                 if y.isnan().any() or y.isinf().any() or (y < 0).any():
                     raise RuntimeError(f"y is {y}")
 
-            if i % BATCH_SIZE == 0:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-
             # compute loss
             pred = model(x_image, x_scalars)
             loss = loss_fn(pred, y)
 
             # backpropagation
             loss.backward()
+            optimizer.step()
 
             # @TODO: Bring back training loss
             # monitoring
@@ -296,8 +301,16 @@ if __name__ == "__main__":
     # load dataset
     training_dataloader, testing_dataloader = dataloaders()
     (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
+    x_image_example, x_scalars_example, y_example = (
+        x_image_example,
+        x_scalars_example,
+        y_example,
+    )
 
     # define model
+    print(f"{x_image_example.shape=}")
+    print(f"{x_scalars_example.shape}")
+    print(f"{y_example.shape}")
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
     model = torch.jit.trace(
         model, (x_image_example.to(device), x_scalars_example.to(device))
