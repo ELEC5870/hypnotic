@@ -132,7 +132,8 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
             if y.isnan().any() or y.isinf().any() or (y < 0).any():
                 raise RuntimeError(f"y is {y}")
 
-            if i % BATCH_SIZE == BATCH_SIZE - 1:
+            if i % BATCH_SIZE == 0:
+                optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
 
             # compute loss
@@ -141,8 +142,6 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
 
             # backpropagation
             loss.backward()
-            if i % BATCH_SIZE == BATCH_SIZE - 1:
-                optimizer.step()
 
             # @TODO: Bring back training loss
             # monitoring
