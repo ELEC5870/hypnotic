@@ -26,7 +26,7 @@ class LaudeAndOstermann(nn.Module):
                                 padding="same", padding_mode="replicate")
         self.layer4 = nn.ReLU()
         self.layer5 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer6 = nn.Linear(in_features=256 * pu_size[0] // 2 * pu_size[0] // 2,
+        self.layer6 = nn.Linear(in_features=256 * pu_size[0] // 2 * pu_size[1] // 2,
                                 out_features=1024)
         self.layer7 = nn.ReLU()
         self.layer8 = nn.Linear(in_features=1024, out_features=67)
@@ -58,7 +58,7 @@ class LaudeAndOstermannPlusScalars(nn.Module):
                                 padding="same", padding_mode="replicate")
         self.layer4 = nn.ReLU()
         self.layer5 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-        self.layer6 = nn.Linear(in_features=256 * pu_size[0] // 2 * pu_size[0] // 2 + num_scalars,
+        self.layer6 = nn.Linear(in_features=256 * pu_size[0] // 2 * pu_size[1] // 2 + num_scalars,
                                 out_features=1024)
         self.layer7 = nn.ReLU()
         self.layer8 = nn.Linear(in_features=1024, out_features=67)
