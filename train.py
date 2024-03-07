@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from contextlib import nullcontext
+import copy
 import itertools
 import os
 import random
@@ -296,13 +297,15 @@ if __name__ == "__main__":
     # define evaluation functions
     if args.loss_function == "mse":
         target_transform = None
-        loss_fn = nn.MSELoss()
+        training_loss_fn = nn.MSELoss()
+        testing_loss_fn = copy.deepcopy(training_loss_fn)
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
         target_transform = lambda y: (
             -(y - y.mean()) / y.std() * args.temperature
         ).softmax(0)
-        loss_fn = nn.CrossEntropyLoss()
+        training_loss_fn = nn.CrossEntropyLoss()
+        testing_loss_fn = copy.deepcopy(training_loss_fn)
         sel_fn = lambda pred: pred.argmax(1)
     rd_cost_fn = (
         lambda pred, y: (y[torch.arange(len(y)), sel_fn(pred).cpu()] - y.min(1).values)
@@ -325,9 +328,9 @@ if __name__ == "__main__":
         (min(mode_freqs) / freq) ** DOWNSAMPLING_FACTOR for freq in mode_freqs
     ]
     training_dataloader.dataset.mode_weights = sampling_weights
-    loss_fn.weight = torch.tensor([1 / weight for weight in sampling_weights]).to(
-        device
-    )
+    training_loss_fn.weight = torch.tensor(
+        [1 / weight for weight in sampling_weights]
+    ).to(device)
 
     # define model
     print(f"{x_image_example.shape=}")
@@ -364,13 +367,13 @@ if __name__ == "__main__":
         train(
             training_dataloader,
             model,
-            loss_fn,
+            training_loss_fn,
             optimizer,
             scheduler,
             t,
             args.profile,
         )
-        test(testing_dataloader, target_transform, model, loss_fn, scheduler, t)
+        test(testing_dataloader, target_transform, model, testing_loss_fn, scheduler, t)
 
         checkpoint_data = {
             "epoch": t,
