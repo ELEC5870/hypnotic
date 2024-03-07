@@ -22,6 +22,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         image_path,
         parquet_path,
         batch_size=32,
+        mode_weights=[1] * NUM_INTRA_MODES,
         filter=None,
         transform=None,
         target_transform=None,
@@ -36,6 +37,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         self.deterministic = deterministic
         self.batch_size = batch_size
         self.batches = defaultdict(list)
+        self.mode_weights = mode_weights
 
     def _load_image(self, path):
         sequence = os.path.splitext(os.path.basename(path))[0]
@@ -90,11 +92,14 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         batches = self._get_batches()
         for batch in batches:
             for row in batch.to_pylist():
+                optimal_mode = min(enumerate(row["cost"]), key=lambda x: x[1])[0]
+                if random.random() > self.mode_weights[optimal_mode]:
+                    continue
                 size = (row["w"], row["h"])
                 self.batches[size].append(self._modify_row(row))
                 if len(self.batches[size]) >= self.batch_size:
                     yield self._get_batch(size)
-        for size in self.batches.keys():
+        for size in list(self.batches.keys()):
             yield self._get_batch(size)
 
     def _modify_row(self, row):

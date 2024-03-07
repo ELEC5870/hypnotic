@@ -21,8 +21,10 @@ from tqdm import tqdm
 from dataset import ParquetRDDataset
 from model import Custom
 
+NUM_MODES = 67
 BATCH_SIZE = 32
 VALIDATE = False
+DOWNSAMPLING_FACTOR = 0.5
 
 
 def seed_prngs(random_seed):
@@ -47,6 +49,16 @@ def image_transform(pu):
     if std != 0:
         pu /= std
     return pu
+
+
+def optimal_mode_distribution(dataset):
+    optimal_mode_frequencies = [0] * NUM_MODES
+    for batch in dataset.to_batches():
+        costs = np.stack(batch["cost"].to_numpy(zero_copy_only=False))
+        optimal_modes = costs.argmin(1)
+        for mode, count in zip(*np.unique(optimal_modes, return_counts=True)):
+            optimal_mode_frequencies[mode] += count
+    return optimal_mode_frequencies
 
 
 def dataloaders():
@@ -305,6 +317,16 @@ if __name__ == "__main__":
         x_image_example,
         x_scalars_example,
         y_example,
+    )
+
+    # set up downsampling & upweighting
+    mode_freqs = optimal_mode_distribution(training_dataloader.dataset.dataset)
+    sampling_weights = [
+        (min(mode_freqs) / freq) ** DOWNSAMPLING_FACTOR for freq in mode_freqs
+    ]
+    training_dataloader.dataset.mode_weights = sampling_weights
+    loss_fn.weight = torch.tensor([1 / weight for weight in sampling_weights]).to(
+        device
     )
 
     # define model
