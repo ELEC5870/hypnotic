@@ -80,7 +80,6 @@ def dataloaders():
     testing_dataset = ParquetRDDataset(
         args.image_path,
         args.testing_data_path,
-        transform=image_transform,
         deterministic=not args.random_seed,
         batch_size=BATCH_SIZE,
     )
@@ -91,6 +90,21 @@ def dataloaders():
     )
 
     return (training_dataloader, testing_dataloader)
+
+
+def image_grid(images):
+    fig, axes = plt.subplots(BATCH_SIZE // 8, 8, figsize=(16, 16))
+    for i, (ax, image) in enumerate(zip(axes.flat, images)):
+        image = image[0]
+        width, height = image.shape
+        ax.set_title(str(i))
+        ax.grid()
+        ax.set_xticks(range(width))
+        ax.set_xticklabels([])
+        ax.set_yticks(range(height))
+        ax.set_yticklabels([])
+        ax.imshow(image, cmap="gray", aspect="equal", extent=(0, width, 0, height))
+    return fig, axes
 
 
 def tb_write_meta():
@@ -114,13 +128,33 @@ def tb_write_meta():
     writer.add_text("git", f"`{repo.head.object.hexsha}`\n```\n{diff}\n```")
 
     # dataset info
-    (x_image, x_scalars), y = next(iter(training_dataloader))
-    log(f"{x_image.shape=} {x_image.dtype=}")
-    log(f"{x_scalars.shape=} {x_scalars.dtype=}")
-    log(f"{y.shape=} {y.dtype=}")
+    log(f"{x_image_example.shape=}")
+    log(f"{x_scalars_example.shape=}")
+    log(f"{y_example.shape=}")
     log(f"{args.random_seed=}")
-    img_grid = torchvision.utils.make_grid(x_image)
-    writer.add_image("input sample", img_grid)
+    fig, axes = image_grid(x_image_example)
+    for ax, scalars, costs in zip(axes.flat, x_scalars_example, y_example):
+        optimal_mode = costs.argmin().item()
+        lagrange = scalars[0]
+        mpm = [int(scalars[i]) for i in range(6, 6 + 6)]
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        ax.text(
+            (xlim[0] + xlim[1]) / 2,
+            (ylim[0] + ylim[1]) / 2,
+            str(optimal_mode),
+            bbox={"boxstyle": "round", "facecolor": "white"},
+            ha="center",
+            va="center",
+        )
+        ax.text(
+            (xlim[0] + xlim[1]) / 2,
+            -1,
+            f"λ={lagrange:.2f}\n{mpm}",
+            ha="center",
+            va="center",
+        )
+    writer.add_figure("input sample", fig)
     writer.flush()
 
 
@@ -182,7 +216,9 @@ def plot_confusion_matrix(cm):
     return plt.gcf()
 
 
-def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
+def test(
+    dataloader, image_transform, target_transform, model, loss_fn, scheduler, epoch
+):
     model.eval()
 
     num_samples = 0
@@ -193,6 +229,12 @@ def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
     with torch.no_grad():
         for (x_image, x_scalars), y in data:
             x_image = x_image.to(device)
+            if image_transform is not None:
+                x_image = torch.stack([image_transform(xi) for xi in x_image]).to(
+                    device
+                )
+            else:
+                x_image = x_image.to(device)
             x_scalars = x_scalars.to(device)
             if target_transform is not None:
                 tx_y = torch.stack([target_transform(yi) for yi in y]).to(device)
@@ -231,6 +273,12 @@ def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
         torch.stack(test_losses),
         epoch,
     )
+    plt.hist(
+        (torch.stack(test_losses) / sum(test_losses)).cpu().numpy(),
+        bins=100,
+        cumulative=True,
+    )
+    writer.add_figure("testing_loss_distribution (cumulative)", plt.gcf(), epoch)
 
     correct /= num_samples
     writer.add_scalar("accuracy", correct, epoch)
@@ -241,6 +289,30 @@ def test(dataloader, target_transform, model, loss_fn, scheduler, epoch):
 
     mean_rd_cost = torch.cat(rd_costs).mean()
     writer.add_scalar("rd_cost", mean_rd_cost, epoch)
+
+    example_pred = model(
+        image_transform(x_image_example).to(device),
+        x_scalars_example.to(device),
+    )
+    example_loss = [
+        loss_fn(p, target_transform(y).to(device))
+        for p, y in zip(example_pred, y_example)
+    ]
+    example_rd_cost = rd_cost_fn(example_pred, y_example)
+
+    fig, axes = image_grid(x_image_example)
+    for ax, pred, loss, cost in zip(
+        axes.flat, example_pred, example_loss, example_rd_cost
+    ):
+        xlim = ax.get_xlim()
+        ax.text(
+            (xlim[0] + xlim[1]) / 2,
+            -1,
+            f"pred: {int(sel_fn(pred[None, :]))}\nloss: {loss:.2f}\n+RD: {cost:.2%}",
+            ha="center",
+            va="center",
+        )
+    writer.add_figure("output example", fig, epoch)
 
     if scheduler is not None:
         scheduler.step(mean_test_loss)
@@ -315,15 +387,13 @@ if __name__ == "__main__":
 
     # load dataset
     training_dataloader, testing_dataloader = dataloaders()
-    (x_image_example, x_scalars_example), y_example = next(iter(training_dataloader))
-    x_image_example, x_scalars_example, y_example = (
-        x_image_example,
-        x_scalars_example,
-        y_example,
-    )
 
     # set up downsampling & upweighting
     mode_freqs = optimal_mode_distribution(training_dataloader.dataset.dataset)
+    plt.bar(range(len(mode_freqs)), mode_freqs)
+    plt.xlabel("optimal mode")
+    plt.ylabel("frequency")
+    writer.add_figure("mode_frequencies", plt.gcf())
     sampling_weights = [
         (min(mode_freqs) / freq) ** DOWNSAMPLING_FACTOR for freq in mode_freqs
     ]
@@ -332,13 +402,19 @@ if __name__ == "__main__":
         [1 / weight for weight in sampling_weights]
     ).to(device)
 
+    # Get example batch
+    (x_image_example, x_scalars_example), y_example = next(iter(testing_dataloader))
+    x_image_example, x_scalars_example, y_example = (
+        x_image_example,
+        x_scalars_example,
+        y_example,
+    )
+
     # define model
-    print(f"{x_image_example.shape=}")
-    print(f"{x_scalars_example.shape}")
-    print(f"{y_example.shape}")
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
     model = torch.jit.trace(
-        model, (x_image_example.to(device), x_scalars_example.to(device))
+        model,
+        (image_transform(x_image_example).to(device), x_scalars_example.to(device)),
     )
 
     # training hyperparameters
@@ -373,7 +449,15 @@ if __name__ == "__main__":
             t,
             args.profile,
         )
-        test(testing_dataloader, target_transform, model, testing_loss_fn, scheduler, t)
+        test(
+            testing_dataloader,
+            image_transform,
+            target_transform,
+            model,
+            testing_loss_fn,
+            scheduler,
+            t,
+        )
 
         checkpoint_data = {
             "epoch": t,

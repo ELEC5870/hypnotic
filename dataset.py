@@ -109,6 +109,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         image = self.images[sequence].crop(
             (row["x"], row["y"], row["x"] + row["w"], row["y"] + row["h"])
         )
+        image = transforms.ToImage()(image)
         if self.transform:
             image = self.transform(image)
 
