@@ -197,11 +197,11 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
             loss.backward()
             optimizer.step()
 
-            # @TODO: Bring back training loss
             # monitoring
-            # writer.add_scalar("training_loss", loss, epoch * batches + i)
+            writer.add_scalar("training_loss", loss, batch_idx)
             if profiler is not None:
                 profiler.step()
+            batch_idx += 1
 
 
 def plot_confusion_matrix(cm):
@@ -439,6 +439,7 @@ if __name__ == "__main__":
         if args.epochs > 0
         else itertools.count(start_epoch)
     )
+    batch_idx = 0
     for t in epochs:
         train(
             training_dataloader,
