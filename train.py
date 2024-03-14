@@ -207,6 +207,7 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
 def plot_confusion_matrix(cm):
     disp = ConfusionMatrixDisplay(cm)
     disp.plot(include_values=False)
+    disp.im_.set_clim(0, 1)
     labels = ["" for _ in range(67)]
     labels[0] = "0"
     labels[18] = "18"
@@ -283,7 +284,8 @@ def test(
     correct /= num_samples
     writer.add_scalar("accuracy", correct, epoch)
 
-    cm = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis]
+    cm_sums = cm.sum(axis=1)[:, np.newaxis]
+    cm = np.divide(cm.astype("float"), cm_sums, where=cm_sums >= 1)
     cm = plot_confusion_matrix(cm)
     writer.add_figure("confusion_matrix", cm, epoch)
 
