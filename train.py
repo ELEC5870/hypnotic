@@ -103,7 +103,7 @@ def image_grid(images):
         ax.set_xticklabels([])
         ax.set_yticks(range(height))
         ax.set_yticklabels([])
-        ax.imshow(image, cmap="gray", aspect="equal", extent=(0, width, 0, height))
+        ax.imshow(image, cmap="gray", extent=(0, height, 0, width))
     return fig, axes
 
 
