@@ -13,6 +13,7 @@ import pyarrow.parquet as pq
 import torch
 from torchvision.transforms import v2 as transforms
 
+MPM_SIZE = 6
 NUM_INTRA_MODES = 67
 
 
@@ -113,21 +114,22 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         if self.transform:
             image = self.transform(image)
 
+        mpm = [0] * NUM_INTRA_MODES
+        for i in range(MPM_SIZE):
+            m = row["mpm" + str(i)]
+            mpm[m] = MPM_SIZE - i
         scalars = torch.tensor(
             [
+                row["w"],
+                row["h"],
                 row["lambda"],
                 row["isp_mode"],
                 row["multi_ref_idx"],
                 row["mip_flag"],
                 row["lfnst_idx"],
                 row["mts_flag"],
-                row["mpm0"],
-                row["mpm1"],
-                row["mpm2"],
-                row["mpm3"],
-                row["mpm4"],
-                row["mpm5"],
             ]
+            + mpm
         )
 
         targets = torch.full((NUM_INTRA_MODES,), torch.nan)

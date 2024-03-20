@@ -22,6 +22,7 @@ from tqdm import tqdm
 from dataset import ParquetRDDataset
 from model import Custom
 
+MPM_SIZE = 6
 NUM_MODES = 67
 BATCH_SIZE = 32
 VALIDATE = False
@@ -135,8 +136,12 @@ def tb_write_meta():
     fig, axes = image_grid(x_image_example)
     for ax, scalars, costs in zip(axes.flat, x_scalars_example, y_example):
         optimal_mode = costs.argmin().item()
-        lagrange = scalars[0]
-        mpm = [int(scalars[i]) for i in range(6, 6 + 6)]
+        lagrange = scalars[2]
+        mpm = [0] * MPM_SIZE
+        for i, p in enumerate(scalars[8 : 8 + NUM_MODES]):
+            p = int(p.item())
+            if p != 0:
+                mpm[MPM_SIZE - int(p)] = i
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
         ax.text(
@@ -152,7 +157,7 @@ def tb_write_meta():
             -1,
             f"λ={lagrange:.2f}\n{mpm}",
             ha="center",
-            va="center",
+            va="top",
         )
     writer.add_figure("input sample", fig)
     writer.flush()
@@ -319,7 +324,7 @@ def test(
             -1,
             f"pred: {int(sel_fn(pred[None, :]))}\nloss: {loss:.2f}\n+RD: {cost:.2%}",
             ha="center",
-            va="center",
+            va="top",
         )
     writer.add_figure("output example", fig, epoch)
 
