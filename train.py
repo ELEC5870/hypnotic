@@ -174,6 +174,7 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
         record_shapes=True,
         with_stack=True,
     )
+    train_losses = []
     with profiler if profile else nullcontext() as profiler:
         for i, ((x_image, x_scalars), y) in enumerate(data):
             optimizer.zero_grad(set_to_none=True)
@@ -202,10 +203,12 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
             optimizer.step()
 
             # monitoring
-            writer.add_scalar("training_loss", loss, batch_idx)
+            train_losses.append(loss)
             if profiler is not None:
                 profiler.step()
-            batch_idx += 1
+
+        mean_train_loss = torch.stack(train_losses).mean()
+        writer.add_scalar("train_loss", mean_train_loss, epoch)
 
 
 def plot_confusion_matrix(cm):
@@ -445,7 +448,6 @@ if __name__ == "__main__":
         if args.epochs > 0
         else itertools.count(start_epoch)
     )
-    batch_idx = 0
     for t in epochs:
         train(
             training_dataloader,
