@@ -19,7 +19,7 @@ import torchvision
 from torchvision.transforms import v2 as transforms
 from tqdm import tqdm
 
-from dataset import ParquetRDDataset
+from dataset import ParquetRDDataset, BufferShuffle, BatchSameSize
 from model import Custom
 
 MPM_SIZE = 6
@@ -55,7 +55,7 @@ def image_transform(pu):
 
 def optimal_mode_distribution(dataset):
     optimal_mode_frequencies = [0] * NUM_MODES
-    for batch in dataset.to_batches():
+    for batch in dataset.dataset.dataset.to_batches():
         costs = np.stack(batch["cost"].to_numpy(zero_copy_only=False))
         optimal_modes = costs.argmin(1)
         for mode, count in zip(*np.unique(optimal_modes, return_counts=True)):
@@ -64,13 +64,19 @@ def optimal_mode_distribution(dataset):
 
 
 def dataloaders():
-    training_dataset = ParquetRDDataset(
-        args.image_path,
-        args.training_data_path,
-        transform=image_transform,
-        target_transform=target_transform,
-        deterministic=not args.random_seed,
+    shape_fn = lambda x: (x[0].shape[1], x[0].shape[2])
+    training_dataset = BatchSameSize(
+        BufferShuffle(
+            ParquetRDDataset(
+                args.image_path,
+                args.training_data_path,
+                transform=image_transform,
+                target_transform=target_transform,
+                deterministic=not args.random_seed,
+            )
+        ),
         batch_size=BATCH_SIZE,
+        shape_fn=shape_fn,
     )
     training_dataloader = DataLoader(
         training_dataset,
@@ -78,11 +84,17 @@ def dataloaders():
         batch_size=None,
     )
 
-    testing_dataset = ParquetRDDataset(
-        args.image_path,
-        args.testing_data_path,
-        deterministic=not args.random_seed,
+    testing_dataset = BatchSameSize(
+        BufferShuffle(
+            ParquetRDDataset(
+                args.image_path,
+                args.testing_data_path,
+                deterministic=not args.random_seed,
+                batch_size=BATCH_SIZE,
+            )
+        ),
         batch_size=BATCH_SIZE,
+        shape_fn=shape_fn,
     )
     testing_dataloader = DataLoader(
         testing_dataset,

@@ -17,6 +17,52 @@ MPM_SIZE = 6
 NUM_INTRA_MODES = 67
 
 
+class BufferShuffle(torch.utils.data.IterableDataset):
+    def __init__(self, dataset, buffer_size=1024):
+        self.dataset = dataset
+        self.buffer_size = buffer_size
+
+    def _shuffle(self, buffer):
+        random.shuffle(buffer)
+        return buffer
+
+    def __iter__(self):
+        buffer = []
+        for item in self.dataset:
+            buffer.append(item)
+            if len(buffer) >= self.buffer_size:
+                yield from self._shuffle(buffer)
+                buffer = []
+        yield from self._shuffle(buffer)
+
+
+class BatchSameSize(torch.utils.data.IterableDataset):
+    def __init__(self, dataset, shape_fn, batch_size=32):
+        self.dataset = dataset
+        self.batch_size = batch_size
+        self.shape_fn = shape_fn
+
+    def _prep_batch(self, batch):
+        images, scalars, targets = zip(*batch)
+        return (
+            (
+                torch.stack(images),
+                torch.stack(scalars),
+            ),
+            torch.stack(targets),
+        )
+
+    def __iter__(self):
+        batches = defaultdict(list)
+        for item in self.dataset:
+            size = self.shape_fn(item)
+            batches[size].append(item)
+            if len(batches[size]) >= self.batch_size:
+                yield self._prep_batch(batches.pop(size))
+        for batch in batches.values():
+            yield self._prep_batch(batch)
+
+
 class ParquetRDDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
@@ -31,13 +77,10 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
     ):
         self.images = self._load_images(image_path)
         self.dataset = self._load_dataset(parquet_path)
-        self.predictors = self._get_predictors(self.dataset.schema)
         self.filter = filter
         self.transform = transform
         self.target_transform = target_transform
         self.deterministic = deterministic
-        self.batch_size = batch_size
-        self.batches = defaultdict(list)
         self.mode_weights = mode_weights
 
     def _load_image(self, path):
@@ -65,29 +108,8 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
         )
         return dataset
 
-    def _get_predictors(self, schema):
-        predictors = schema.names
-        for col in ["intra_mode", "cost", "dist", "fracBits"]:
-            try:
-                predictors.remove(col)
-            # Ignore if col is not present
-            except ValueError:
-                pass
-        return predictors
-
     def _get_batches(self):
         return self.dataset.to_batches(filter=self.filter, batch_size=1024)
-
-    def _get_batch(self, size):
-        batch = self.batches.pop(size)
-        images, scalars, targets = zip(*batch)
-        return (
-            (
-                torch.stack(images),
-                torch.stack(scalars),
-            ),
-            torch.stack(targets),
-        )
 
     def __iter__(self):
         batches = self._get_batches()
@@ -96,12 +118,7 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
                 optimal_mode = min(enumerate(row["cost"]), key=lambda x: x[1])[0]
                 if random.random() > self.mode_weights[optimal_mode]:
                     continue
-                size = (row["w"], row["h"])
-                self.batches[size].append(self._modify_row(row))
-                if len(self.batches[size]) >= self.batch_size:
-                    yield self._get_batch(size)
-        for size in list(self.batches.keys()):
-            yield self._get_batch(size)
+                yield self._modify_row(row)
 
     def _modify_row(self, row):
         # @TODO: Remove this.
@@ -284,8 +301,7 @@ IntraCost T x=0,y=1,w=2,h=3,cost=66.0,dist=66.0,fracBits=66.0,lambda=1.0,modeId=
                 transform=transforms.ToImage(),
             )
 
-            (image, scalars), target = next(iter(dataset))
-            image, scalars, target = image[0], scalars[0], target[0]
+            image, scalars, target = next(iter(dataset))
             self.assertTrue(image.count_nonzero() == 0)
             for mode_id, cost in enumerate(target):
                 self.assertEqual(cost, NUM_INTRA_MODES - mode_id - 1)
