@@ -47,15 +47,17 @@ class BatchSameSize(torch.utils.data.IterableDataset):
         self.target_transform = target_transform
 
     def _prep_batch(self, batch):
-        images, scalars, targets = zip(*batch)
+        images, scalars, costs, distortions, bits = zip(*batch)
         images = torch.stack(images)
         scalars = torch.stack(scalars)
-        targets = torch.stack(targets)
+        costs = torch.stack(costs)
+        distortions = torch.stack(distortions)
+        bits = torch.stack(bits)
         if self.transform:
             images = self.transform(images)
         if self.target_transform:
-            targets = self.target_transform(targets)
-        return ((images, scalars), targets)
+            costs = self.target_transform(costs)
+        return ((images, scalars), (costs, distortions, bits))
 
     def __iter__(self):
         batches = defaultdict(list)
@@ -154,18 +156,20 @@ class ParquetRDDataset(torch.utils.data.IterableDataset):
             + mpm
         )
 
-        targets = torch.full((NUM_INTRA_MODES,), torch.nan)
-        for intra_mode, cost in enumerate(row["cost"]):
-            targets[intra_mode] = cost
-        if targets.isnan().any():
+        costs = torch.tensor(row["cost"])
+        if costs[0].isnan().any():
             raise ValueError(f"NaN cost(s) in row {row}")
         if self.target_transform:
-            targets = self.target_transform(targets)
+            costs = self.target_transform(costs)
+        distortions = torch.tensor(row["dist"])
+        bits = torch.tensor(row["fracBits"])
 
         return (
             image,
             scalars,
-            targets,
+            costs,
+            distortions,
+            bits,
         )
 
 

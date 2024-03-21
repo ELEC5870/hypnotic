@@ -193,7 +193,7 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
     )
     train_losses = []
     with profiler if profile else nullcontext() as profiler:
-        for i, ((x_image, x_scalars), y) in enumerate(data):
+        for i, ((x_image, x_scalars), (y, _, _)) in enumerate(data):
             optimizer.zero_grad(set_to_none=True)
 
             x_image = x_image.to(device)
@@ -252,10 +252,12 @@ def test(
     cm = np.zeros((67, 67), dtype=np.int64)
 
     with torch.no_grad():
-        for (x_image, x_scalars), y in data:
+        for (x_image, x_scalars), (y, dist, bits) in data:
             x_image = x_image.to(device)
             x_scalars = x_scalars.to(device)
             y = y.to(device)
+            dist = dist.to(device)
+            bits = bits.to(device)
             if image_transform is not None:
                 x_image = image_transform(x_image)
             if target_transform is not None:
@@ -285,7 +287,11 @@ def test(
             cm += confusion_matrix(
                 sel_fn(tx_y).cpu(), sel_fn(pred).cpu(), labels=range(67)
             )
-            rd_costs.append(rd_cost_fn(pred, y))
+            rd_costs.append(rd_cost_fn(pred, y, dist, bits))
+            rd_costs[-1][:, 1] *= (1 << 15) / x_scalars[:, 2]
+            rd_costs[-1] = torch.cat(
+                (rd_costs[-1], (rd_costs[-1][:, 0] / y.min(1).values)[:, None]), dim=1
+            )
 
     # @NOTE: This is a mean of means, which is a bit wrong
     mean_test_loss = torch.stack(test_losses).mean()
@@ -310,8 +316,12 @@ def test(
     cm = plot_confusion_matrix(cm)
     writer.add_figure("confusion_matrix", cm, epoch)
 
-    mean_rd_cost = torch.cat(rd_costs).mean()
-    writer.add_scalar("rd_cost", mean_rd_cost, epoch)
+    rd_costs = torch.cat(rd_costs)
+    mean_rd_costs = torch.mean(rd_costs, dim=0)
+    writer.add_scalar("rd_cost", mean_rd_costs[0], epoch)
+    writer.add_scalar("distortion cost", mean_rd_costs[1], epoch)
+    writer.add_scalar("rate cost", mean_rd_costs[2], epoch)
+    writer.add_scalar("rd cost %", mean_rd_costs[3], epoch)
 
     example_pred = model(
         image_transform(x_image_example).to(device),
@@ -321,11 +331,14 @@ def test(
         loss_fn(p, target_transform(y).to(device))
         for p, y in zip(example_pred, y_example)
     ]
-    example_rd_cost = rd_cost_fn(example_pred, y_example)
+    example_rd_cost = rd_cost_fn(
+        example_pred.cpu(), y_example, dist_example, bits_example
+    )
+    example_rd_cost[:, 1] *= x_scalars_example[:, 2]
 
     fig, axes = image_grid(x_image_example)
     for ax, pred, loss, cost in zip(
-        axes.flat, example_pred, example_loss, example_rd_cost
+        axes.flat, example_pred, example_loss, example_rd_cost[0]
     ):
         xlim = ax.get_xlim()
         ax.text(
@@ -341,7 +354,7 @@ def test(
         scheduler.step(mean_test_loss)
 
     log(
-        f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%, RD cost vs optimal: {100 * mean_rd_cost:.2f}%"
+        f"loss: {mean_test_loss:.4f}, accuracy: {100 * correct:.2f}%, RD cost vs optimal: {100 * mean_rd_costs[3]:.2f}%"
     )
 
 
@@ -402,11 +415,22 @@ if __name__ == "__main__":
         training_loss_fn = nn.CrossEntropyLoss()
         testing_loss_fn = copy.deepcopy(training_loss_fn)
         sel_fn = lambda pred: pred.argmax(1)
-    rd_cost_fn = (
-        lambda pred, y: (y[torch.arange(len(y)), sel_fn(pred).cpu()] - y.min(1).values)
-        / y.min(1).values
-    )
+
+    def rd_cost_fn(pred, y, dist, bits):
+        optimal = y.argmin(1)
+        sel = sel_fn(pred)
+        costs = torch.stack([y, dist, bits], dim=1)
+        assert costs.shape[-1] == NUM_MODES
+        assert sel.shape == optimal.shape
+        return (
+            costs[torch.arange(len(sel)), :, sel]
+            - costs[torch.arange(len(sel)), :, optimal]
+        )
+
     correct_fn = lambda pred, y: (sel_fn(pred) == sel_fn(y)).float().sum().item()
+    assert (
+        correct_fn(torch.tensor([[0, 1], [1, 0]]), torch.tensor([[0, 1], [0, 1]])) == 1
+    )
 
     # load dataset
     training_dataloader, testing_dataloader = dataloaders()
@@ -426,12 +450,11 @@ if __name__ == "__main__":
     ).to(device)
 
     # Get example batch
-    (x_image_example, x_scalars_example), y_example = next(iter(testing_dataloader))
-    x_image_example, x_scalars_example, y_example = (
-        x_image_example,
-        x_scalars_example,
+    (x_image_example, x_scalars_example), (
         y_example,
-    )
+        dist_example,
+        bits_example,
+    ) = next(iter(testing_dataloader))
 
     # define model
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
