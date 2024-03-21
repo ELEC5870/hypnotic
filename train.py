@@ -53,7 +53,7 @@ def image_transform(pu):
 
 def optimal_mode_distribution(dataset):
     optimal_mode_frequencies = [0] * NUM_MODES
-    for batch in dataset.dataset.dataset.to_batches():
+    for batch in dataset.to_batches():
         costs = np.stack(batch["cost"].to_numpy(zero_copy_only=False))
         optimal_modes = costs.argmin(1)
         for mode, count in zip(*np.unique(optimal_modes, return_counts=True)):
@@ -429,7 +429,10 @@ if __name__ == "__main__":
     training_dataloader, testing_dataloader = dataloaders()
 
     # set up downsampling & upweighting
-    mode_freqs = optimal_mode_distribution(training_dataloader.dataset.dataset)
+    # this line of code is cursed.
+    mode_freqs = optimal_mode_distribution(
+        training_dataloader.dataset.dataset.dataset.dataset
+    )
     plt.bar(range(len(mode_freqs)), mode_freqs)
     plt.xlabel("optimal mode")
     plt.ylabel("frequency")
@@ -437,7 +440,7 @@ if __name__ == "__main__":
     sampling_weights = [
         (min(mode_freqs) / freq) ** DOWNSAMPLING_FACTOR for freq in mode_freqs
     ]
-    training_dataloader.dataset.mode_weights = sampling_weights
+    training_dataloader.dataset.dataset.dataset.mode_weights = sampling_weights
     training_loss_fn.weight = torch.tensor(
         [1 / weight for weight in sampling_weights]
     ).to(device)
