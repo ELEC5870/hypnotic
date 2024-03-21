@@ -46,7 +46,8 @@ def image_transform(pu):
             transforms.ToDtype(torch.float32, scale=True),
         ]
     )(pu)
-    pu -= pu.mean()
+    mean = pu.view(pu.size(0), pu.size(1), -1).mean(2)
+    pu -= mean.unsqueeze(-1).unsqueeze(-1)
     return pu
 
 
@@ -322,10 +323,7 @@ def test(
         image_transform(x_image_example).to(device),
         x_scalars_example.to(device),
     )
-    example_loss = [
-        loss_fn(p, target_transform(y).to(device))
-        for p, y in zip(example_pred, y_example)
-    ]
+    example_loss = [loss_fn(example_pred, target_transform(y_example.to(device)))]
     example_rd_cost = rd_cost_fn(
         example_pred.cpu(), y_example, dist_example, bits_example
     )
@@ -405,8 +403,8 @@ if __name__ == "__main__":
         sel_fn = lambda pred: pred.argmin(1)
     elif args.loss_function == "crossentropy":
         target_transform = lambda y: (
-            -(y - y.mean()) / y.std() * args.temperature
-        ).softmax(0)
+            -(y - y.mean(1).unsqueeze(-1)) / y.std(1).unsqueeze(-1) * args.temperature
+        ).softmax(1)
         training_loss_fn = nn.CrossEntropyLoss()
         testing_loss_fn = copy.deepcopy(training_loss_fn)
         sel_fn = lambda pred: pred.argmax(1)
