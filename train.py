@@ -182,10 +182,8 @@ def train(dataloader, model, loss_fn, optimizer, scheduler, epoch, profile=False
         disable=args.quiet,
     )
     profiler = torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU],
         on_trace_ready=torch.profiler.tensorboard_trace_handler(run_dir),
         profile_memory=True,
-        record_shapes=True,
         with_stack=True,
     )
     train_losses = []
