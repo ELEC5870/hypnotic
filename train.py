@@ -47,9 +47,6 @@ def image_transform(pu):
         ]
     )(pu)
     pu -= pu.mean()
-    std = pu.std()
-    if std != 0:
-        pu /= std
     return pu
 
 
