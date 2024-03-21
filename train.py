@@ -453,10 +453,8 @@ if __name__ == "__main__":
 
     # define model
     model = Custom(num_scalars=x_scalars_example.shape[1]).to(device)
-    model = torch.jit.trace(
-        model,
-        (image_transform(x_image_example).to(device), x_scalars_example.to(device)),
-    )
+    model = torch.jit.script(model).to(device)
+    model(image_transform(x_image_example.to(device)), x_scalars_example.to(device))
 
     # training hyperparameters
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)

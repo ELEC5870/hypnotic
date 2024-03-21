@@ -94,7 +94,8 @@ class Custom(nn.Module):
         self.layer6 = nn.Linear(in_features=2 * 2 * 256 + num_scalars,
                                 out_features=1024)
         self.layer7 = nn.ReLU()
-        self.layer8 = nn.Linear(in_features=1024, out_features=67)
+        self.layer8 = nn.Dropout(p=0.2)
+        self.layer9 = nn.Linear(in_features=1024, out_features=67)
         # fmt: on
 
     def forward(self, image, scalars):
@@ -108,4 +109,5 @@ class Custom(nn.Module):
         pred = self.layer6(pred)
         pred = self.layer7(pred)
         pred = self.layer8(pred)
+        pred = self.layer9(pred)
         return pred
