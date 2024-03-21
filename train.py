@@ -70,13 +70,13 @@ def dataloaders():
             ParquetRDDataset(
                 args.image_path,
                 args.training_data_path,
-                transform=image_transform,
-                target_transform=target_transform,
                 deterministic=not args.random_seed,
             )
         ),
         batch_size=BATCH_SIZE,
         shape_fn=shape_fn,
+        transform=image_transform,
+        target_transform=target_transform,
     )
     training_dataloader = DataLoader(
         training_dataset,
@@ -254,17 +254,14 @@ def test(
     with torch.no_grad():
         for (x_image, x_scalars), y in data:
             x_image = x_image.to(device)
-            if image_transform is not None:
-                x_image = torch.stack([image_transform(xi) for xi in x_image]).to(
-                    device
-                )
-            else:
-                x_image = x_image.to(device)
             x_scalars = x_scalars.to(device)
+            y = y.to(device)
+            if image_transform is not None:
+                x_image = image_transform(x_image)
             if target_transform is not None:
-                tx_y = torch.stack([target_transform(yi) for yi in y]).to(device)
+                tx_y = target_transform(y)
             else:
-                tx_y = y.to(device)
+                tx_y = y
             num_samples += x_image.shape[0]
 
             # validate input

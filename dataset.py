@@ -37,20 +37,25 @@ class BufferShuffle(torch.utils.data.IterableDataset):
 
 
 class BatchSameSize(torch.utils.data.IterableDataset):
-    def __init__(self, dataset, shape_fn, batch_size=32):
+    def __init__(
+        self, dataset, shape_fn, batch_size=32, transform=None, target_transform=None
+    ):
         self.dataset = dataset
-        self.batch_size = batch_size
         self.shape_fn = shape_fn
+        self.batch_size = batch_size
+        self.transform = transform
+        self.target_transform = target_transform
 
     def _prep_batch(self, batch):
         images, scalars, targets = zip(*batch)
-        return (
-            (
-                torch.stack(images),
-                torch.stack(scalars),
-            ),
-            torch.stack(targets),
-        )
+        images = torch.stack(images)
+        scalars = torch.stack(scalars)
+        targets = torch.stack(targets)
+        if self.transform:
+            images = self.transform(images)
+        if self.target_transform:
+            targets = self.target_transform(targets)
+        return ((images, scalars), targets)
 
     def __iter__(self):
         batches = defaultdict(list)
