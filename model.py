@@ -3,7 +3,7 @@ import torch.nn as nn
 from torchvision.models import resnet50
 
 
-class NullModel(nn.Module):
+class AlwaysPlanar(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -11,6 +11,20 @@ class NullModel(nn.Module):
         ret = torch.zeros((image.shape[0], 67))
         ret[:, 0] = 1
         return ret.to(image.device)
+
+
+class Random(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, image, scalars):
+        return (
+            nn.functional.one_hot(
+                torch.randint(0, 67, (image.shape[0],)), num_classes=67
+            )
+            .float()
+            .to(image.device)
+        )
 
 
 class LaudeAndOstermann(nn.Module):
